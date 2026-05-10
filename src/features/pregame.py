@@ -54,7 +54,28 @@ def calculate_pregame_features(df_raw):
     df = df.merge(coords_df.rename(columns={'team_abbreviation': 'opp_abbrev_safe', 'lat': 'opp_home_lat', 'lon': 'opp_home_lon'}),
                   on='opp_abbrev_safe', how='left')
 
-    # 3. Handle Venue Edge Cases (Toronto 2021, Clippers 2025)
+    # 3. Handle Venue Edge Cases (Historical Moves)
+    # Sacramento Kings (Moved to Golden 1 Center in 2016-17)
+    mask_sac_pre_2017 = (df['team_abbreviation'] == 'SAC') & (df['season'] < 2017)
+    df.loc[mask_sac_pre_2017, ['my_home_lat', 'my_home_lon']] = [38.64, -121.51]
+    
+    mask_opp_sac_pre_2017 = (df['opp_abbrev_safe'] == 'SAC') & (df['season'] < 2017)
+    df.loc[mask_opp_sac_pre_2017, ['opp_home_lat', 'opp_home_lon']] = [38.64, -121.51]
+
+    # Detroit Pistons (Moved to Little Caesars Arena in 2017-18)
+    mask_det_pre_2018 = (df['team_abbreviation'] == 'DET') & (df['season'] < 2018)
+    df.loc[mask_det_pre_2018, ['my_home_lat', 'my_home_lon']] = [42.69, -83.24]
+    
+    mask_opp_det_pre_2018 = (df['opp_abbrev_safe'] == 'DET') & (df['season'] < 2018)
+    df.loc[mask_opp_det_pre_2018, ['opp_home_lat', 'opp_home_lon']] = [42.69, -83.24]
+
+    # Golden State Warriors (Moved to Chase Center in 2019-20)
+    mask_gsw_pre_2020 = (df['team_abbreviation'] == 'GSW') & (df['season'] < 2020)
+    df.loc[mask_gsw_pre_2020, ['my_home_lat', 'my_home_lon']] = [37.75, -122.20]
+    
+    mask_opp_gsw_pre_2020 = (df['opp_abbrev_safe'] == 'GSW') & (df['season'] < 2020)
+    df.loc[mask_opp_gsw_pre_2020, ['opp_home_lat', 'opp_home_lon']] = [37.75, -122.20]
+
     # Toronto Raptors (2021 Season) moved to Amalie Arena in Tampa, FL
     mask_tor_2021 = (df['team_abbreviation'] == 'TOR') & (df['season'] == 2021)
     df.loc[mask_tor_2021, ['my_home_lat', 'my_home_lon']] = [27.94, -82.45]
@@ -69,11 +90,22 @@ def calculate_pregame_features(df_raw):
     mask_opp_lac_2025 = (df['opp_abbrev_safe'] == 'LAC') & (df['season'] >= 2025)
     df.loc[mask_opp_lac_2025, ['opp_home_lat', 'opp_home_lon']] = [33.94, -118.34]
 
-    # 4. Determine Game Location Coordinates
-    df['game_lat'] = np.where(df['team_home_away'] == 'home', df['my_home_lat'], df['opp_home_lat'])
-    df['game_lon'] = np.where(df['team_home_away'] == 'home', df['my_home_lon'], df['opp_home_lon'])
+    # 4. Handle Neutral Sites (Bubble & Global Games)
+    # NBA Bubble (Orlando 2020)
+    # Most games from July 30, 2020, to October 11, 2020, were in the Disney Bubble
+    bubble_start = '2020-07-30'
+    bubble_end = '2020-10-11'
+    mask_bubble = df['game_date'].between(bubble_start, bubble_end)
+    df.loc[mask_bubble, ['game_lat', 'game_lon']] = [28.37, -81.55]
 
-    # 5. Time and Travel Features (Vectorized GroupBy)
+    # Note: Global Games (Mexico, Paris, London) are rarer but can be added if game_id is known.
+    # For now, we prioritize the Bubble as it impacts hundreds of games.
+
+    # 5. Determine Game Location Coordinates (for non-bubble games)
+    df['game_lat'] = df['game_lat'].fillna(np.where(df['team_home_away'] == 'home', df['my_home_lat'], df['opp_home_lat']))
+    df['game_lon'] = df['game_lon'].fillna(np.where(df['team_home_away'] == 'home', df['my_home_lon'], df['opp_home_lon']))
+
+    # 6. Time and Travel Features (Vectorized GroupBy)
     df = df.sort_values(['team_id', 'game_date'])
     df['game_date'] = pd.to_datetime(df['game_date'])
     
