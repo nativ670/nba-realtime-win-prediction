@@ -36,3 +36,4 @@ The project is strictly organized as follows. All new code must be placed in the
 * Assume the user is an expert in data science but is transitioning this specific codebase from R to Python.
 * Prioritize Pandas vectorization over loops for all feature engineering.
 * Always include robust error handling, especially when hitting web APIs for data.
+* Remember to update the requirements.txt file when necessary.
