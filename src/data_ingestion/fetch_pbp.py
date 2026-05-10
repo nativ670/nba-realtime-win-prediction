@@ -27,25 +27,27 @@ MAX_RETRIES = 3
 
 def get_game_ids(seasons):
     """
-    Retrieves all regular season game IDs for a list of seasons.
+    Retrieves all regular season and playoff game IDs for a list of seasons.
     """
     all_games = []
-    print(f"Fetching game IDs for seasons: {seasons}...")
+    season_types = [SeasonTypeAllStar.regular, SeasonTypeAllStar.playoffs]
+    print(f"Fetching game IDs for seasons: {seasons} (Regular + Playoffs)...")
     
     for season in seasons:
-        try:
-            # Query LeagueGameFinder for NBA games in the specific season
-            game_finder = leaguegamefinder.LeagueGameFinder(
-                season_nullable=season,
-                league_id_nullable='00', # NBA
-                season_type_nullable=SeasonTypeAllStar.regular # Regular Season
-            )
-            games = game_finder.get_data_frames()[0]
-            all_games.append(games)
-            print(f"  - {season}: Found {len(games)} games")
-            time.sleep(REQUEST_DELAY) # Rate limiting
-        except Exception as e:
-            print(f"  - Error fetching IDs for {season}: {e}")
+        for s_type in season_types:
+            try:
+                # Query LeagueGameFinder for NBA games
+                game_finder = leaguegamefinder.LeagueGameFinder(
+                    season_nullable=season,
+                    league_id_nullable='00', # NBA
+                    season_type_nullable=s_type
+                )
+                games = game_finder.get_data_frames()[0]
+                all_games.append(games)
+                print(f"  - {season} ({s_type}): Found {len(games)} games")
+                time.sleep(REQUEST_DELAY) # Rate limiting
+            except Exception as e:
+                print(f"  - Error fetching IDs for {season} {s_type}: {e}")
             
     if not all_games:
         return []
@@ -129,15 +131,15 @@ def run_ingestion(limit_games=None):
 # ==============================================================================
 
 if __name__ == "__main__":
-    # Lightweight test: Fetch 2 games from the current season
-    print("RUNNING LIGHTWEIGHT TEST (2 GAMES)...")
+    # Lightweight test: Fetch 1 regular season and 1 playoff game
+    print("RUNNING LIGHTWEIGHT TEST (PLAYOFF INCLUSION)...")
     TEST_SEASONS = ["2023-24"]
     # Temporarily override SEASONS for testing
     original_seasons = SEASONS
     SEASONS = TEST_SEASONS
     
     start_time = time.time()
-    run_ingestion(limit_games=2)
+    run_ingestion(limit_games=5) # Increased slightly to ensure we see both types if possible
     
     duration = (time.time() - start_time) / 60
     print(f"Test job completed in {duration:.2f} minutes.")
