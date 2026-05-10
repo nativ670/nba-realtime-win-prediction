@@ -28,3 +28,9 @@ ELO_TEAM_MAP = {
     "CHA": "CHO",
     "PHX": "PHO"
 }
+
+if __name__ == "__main__":
+    print("TEAM_COORDS sample (BOS):", TEAM_COORDS["BOS"])
+    print("TEAM_ABBREV_MAP sample (GS -> GSW):", TEAM_ABBREV_MAP["GS"])
+    print("ELO_TEAM_MAP sample (BKN -> BRK):", ELO_TEAM_MAP["BKN"])
+    print("Helpers test complete.")

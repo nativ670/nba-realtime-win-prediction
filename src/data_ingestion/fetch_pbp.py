@@ -1,7 +1,7 @@
 import pandas as pd
 import time
 import os
-from nba_api.stats.endpoints import leaguegamefinder, playbyplayv2
+from nba_api.stats.endpoints import leaguegamefinder, playbyplayv3
 from nba_api.stats.library.parameters import SeasonTypeAllStar
 
 # ==============================================================================
@@ -59,7 +59,7 @@ def fetch_pbp_for_game(game_id):
     """
     for attempt in range(MAX_RETRIES):
         try:
-            pbp = playbyplayv2.PlayByPlayV2(game_id=game_id)
+            pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
             return pbp.get_data_frames()[0]
         except Exception as e:
             wait_time = (attempt + 1) * 2
