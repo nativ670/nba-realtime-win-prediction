@@ -1,0 +1,9 @@
+pandas
+numpy
+requests
+geopy
+nba_api
+scikit-learn
+xgboost
+ipykernel
+pyarrow

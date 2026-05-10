@@ -7,7 +7,6 @@ We are building a machine learning project to predict the real-time winning perc
 * **Language:** Python
 * **Data Manipulation:** Pandas, NumPy
 * **Data Sources:** `nba_api` (for box scores/play-by-play), Neil Paine's GitHub (for Elo)
-* **Geospatial:** `geopy` (for Haversine travel distance)
 * **Machine Learning:** Scikit-Learn, XGBoost
 
 ## 📊 The Feature Engineering Game Plan
@@ -37,3 +36,7 @@ The project is strictly organized as follows. All new code must be placed in the
 * Prioritize Pandas vectorization over loops for all feature engineering.
 * Always include robust error handling, especially when hitting web APIs for data.
 * Remember to update the requirements.txt file when necessary.
+* **Clean Code:** Write clean, modular, and highly commented Python code, prioritizing Pandas vectorization over loops.
+* **Storage Efficiency (No Bloat):** Do NOT save massive raw datasets (like 10 years of CSVs) to the local machine. Keep local storage to an absolute minimum. Process data in memory when possible. If data absolutely must be cached locally, use compressed formats like `.parquet` instead of bulky `.csv` files.
+* **Optimized Fetching (The Fast Break):** Make data fetching as efficient and lightweight as possible. Utilize intelligent batching, caching, or asynchronous requests to avoid redundant API calls while strictly respecting the `nba_api` rate limits.
+* **Built-in Shootarounds (Mandatory Testing):** EVERY single Python script must include an `if __name__ == "__main__":` block at the bottom. This block must execute a lightweight test of the script's functions using a tiny, mocked, or severely limited subset of data (e.g., just 1 game or 1 season). We must be able to run and verify the code on a small scale before applying it to the massive 10-year dataset.

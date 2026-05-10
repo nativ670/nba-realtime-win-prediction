@@ -1,82 +1,28 @@
 import pandas as pd
 import numpy as np
-import io
-import requests
 from datetime import datetime
 
-# ==============================================================================
-# CONSTANTS & MAPPINGS
-# ==============================================================================
-
-# Specific dictionary mapping for all 30 NBA team venue coordinates (lat, lon)
-TEAM_COORDS = {
-    "ATL": (33.75, -84.39), "BOS": (42.36, -71.06), "BKN": (40.68, -73.97),
-    "CHA": (35.22, -80.84), "CHI": (41.88, -87.62), "CLE": (41.49, -81.69),
-    "DAL": (32.79, -96.81), "DEN": (39.75, -105.00), "DET": (42.34, -83.05),
-    "GSW": (37.76, -122.38), "HOU": (29.75, -95.36), "IND": (39.76, -86.15),
-    "LAC": (34.04, -118.26), "LAL": (34.04, -118.26), "MEM": (35.13, -90.05),
-    "MIA": (25.78, -80.19), "MIL": (43.04, -87.91), "MIN": (44.97, -93.27),
-    "NOP": (29.94, -90.08), "NYK": (40.75, -73.99), "OKC": (35.46, -97.51),
-    "ORL": (28.53, -81.38), "PHI": (39.90, -75.17), "PHX": (33.44, -112.07),
-    "POR": (45.53, -122.66), "SAC": (38.58, -121.49), "SAS": (29.42, -98.49),
-    "TOR": (43.64, -79.37), "UTA": (40.76, -111.90), "WAS": (38.89, -77.02)
-}
-
-# Team Abbreviation Standardization (matches R script's case_when)
-TEAM_ABBREV_MAP = {
-    "GS": "GSW",
-    "NO": "NOP",
-    "NY": "NYK",
-    "SA": "SAS",
-    "UTAH": "UTA",
-    "WSH": "WAS"
-}
-
-# Elo Team Mapping (for Neil Paine dataset)
-ELO_TEAM_MAP = {
-    "BKN": "BRK",
-    "CHA": "CHO",
-    "PHX": "PHO"
-}
+# Import constants and fetcher from project structure
+from src.utils.helpers import TEAM_COORDS, TEAM_ABBREV_MAP, ELO_TEAM_MAP
+from src.data_ingestion.fetch_elo import fetch_elo_data
 
 # ==============================================================================
-# UTILITY FUNCTIONS
+# GEOSPATIAL UTILITY
 # ==============================================================================
 
 def haversine_vectorized(lat1, lon1, lat2, lon2):
     """
     Calculate the great circle distance between two points on the earth
     (specified in decimal degrees) using the Haversine formula.
-    Returns distance in miles.
+    Returns distance in miles. Vectorized for Pandas performance.
     """
-    # Convert decimal degrees to radians 
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-
-    # Haversine formula 
     dlat = lat2 - lat1 
     dlon = lon2 - lon1 
     a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
     c = 2 * np.arcsin(np.sqrt(a)) 
-    
-    # Radius of earth in miles (matching R's geosphere approximately)
-    # R uses equatorial radius 6378137m / 1609.34m per mile approx 3963.2
-    r = 3963.2 
+    r = 3963.2 # Radius of earth in miles
     return c * r
-
-def fetch_elo_data():
-    """
-    Downloads Neil Paine's Elo Data from GitHub.
-    """
-    url = "https://raw.githubusercontent.com/Neil-Paine-1/NBA-elo/main/nba_elo.csv"
-    try:
-        print(f"Downloading Elo data from {url}...")
-        response = requests.get(url)
-        response.raise_for_status()
-        elo_df = pd.read_csv(io.StringIO(response.text))
-        return elo_df
-    except Exception as e:
-        print(f"Error fetching Elo data: {e}")
-        return pd.DataFrame()
 
 # ==============================================================================
 # FEATURE ENGINEERING LOGIC
@@ -86,8 +32,8 @@ def calculate_pregame_features(df_raw):
     """
     Primary feature engineering engine. 
     Translates R data manipulation into vectorized Pandas operations.
+    Focuses on travel, rest, and basic performance.
     """
-    # Create a copy to avoid SettingWithCopyWarning
     df = df_raw.copy()
     
     # 1. Standardize Team Abbreviations
@@ -102,14 +48,9 @@ def calculate_pregame_features(df_raw):
     df = df.rename(columns={'lat': 'my_home_lat', 'lon': 'my_home_lon'})
     
     # Join for opponent team
-    # First get unique team_id -> team_abbreviation mapping from current data if possible,
-    # or just use the coords_df join on opponent_team_abbreviation if available.
-    # The R script assumes it can find the opponent abbreviation.
-    # We'll create a mapping from team_id to abbreviation to be safe.
     team_id_map = df[['team_id', 'team_abbreviation']].drop_duplicates().set_index('team_id')['team_abbreviation']
     df['opp_abbrev_safe'] = df['opponent_team_id'].map(team_id_map)
     
-    # Join coordinates for opponent
     df = df.merge(coords_df.rename(columns={'team_abbreviation': 'opp_abbrev_safe', 'lat': 'opp_home_lat', 'lon': 'opp_home_lon'}),
                   on='opp_abbrev_safe', how='left')
 
@@ -158,16 +99,9 @@ def calculate_pregame_features(df_raw):
         df['game_lat'], df['game_lon']
     ).fillna(0)
     
-    # Distance Category (Matches R's cut)
-    df['dist_cat'] = pd.cut(df['distance_traveled'], 
-                            bins=[-1, 200, 1500, 100000], 
-                            labels=['Short (<200)', 'Medium', 'Long (>1500)'])
-    
     df['is_home'] = (df['team_home_away'] == 'home').astype(int)
 
     # 6. Performance Metrics (Net Rating)
-    # Formula: (Point Diff / Possessions) * 100
-    # Possessions Estimate: 0.96 * (FGA + 0.44 * FTA - ORB + TOV)
     df['possessions'] = 0.96 * (
         df['field_goals_attempted'] + 
         (0.44 * df['free_throws_attempted']) - 
@@ -175,31 +109,58 @@ def calculate_pregame_features(df_raw):
         df['turnovers']
     )
     df['point_diff'] = df['team_score'] - df['opponent_team_score']
-    df['net_rating'] = (df['point_diff'] / df['possessions']) * 100
+    df['net_rating'] = (df['point_diff'] / df['possessions'].replace(0, np.nan)) * 100
     
     return df
 
 def add_external_features(df, elo_df):
     """
     Merges Elo data and calculates relative features like Rest Advantage.
+    Optimized for playoff awareness and using both teams' Elo ratings.
     """
-    # Neil Paine Team Mapping
-    df['neil_team_abbrev'] = df['team_abbreviation'].replace(ELO_TEAM_MAP)
+    # 1. Prep Elo Data for Join
+    # Neil Paine dataset uses home (team1) and away (team2)
+    elo_cols = ['date', 'team1', 'team2', 'elo1_pre', 'elo2_pre', 'playoff']
+    elo_clean = elo_df[elo_cols].copy()
+    elo_clean['date'] = pd.to_datetime(elo_clean['date'])
     
-    # Merge Elo
-    # Note: elo_df columns are usually [date, team1, elo1_pre, team2, elo2_pre, ...]
-    # The R scriptrenames elo2_pre but joins on team1. 
-    # Let's align with the R script's join logic: 
-    # inner_join(elo_data, by = c("game_date", "neil_team_abbrev" = "team1"))
-    elo_subset = elo_df[['date', 'team1', 'elo2_pre']].copy()
-    elo_subset['date'] = pd.to_datetime(elo_subset['date'])
+    # Standardize our team abbreviations to match Neil Paine's
+    df['neil_team'] = df['team_abbreviation'].replace(ELO_TEAM_MAP)
+    df['neil_opp'] = df['opp_abbrev_safe'].replace(ELO_TEAM_MAP)
     
-    df = df.merge(elo_subset, 
-                  left_on=['game_date', 'neil_team_abbrev'], 
-                  right_on=['date', 'team1'], 
-                  how='inner')
+    # 2. Join Elo (Handling Home/Away context)
+    # Join where our team is Team1 (Home)
+    df_home = df[df['team_home_away'] == 'home'].merge(
+        elo_clean, 
+        left_on=['game_date', 'neil_team', 'neil_opp'],
+        right_on=['date', 'team1', 'team2'],
+        how='inner'
+    )
+    df_home['my_elo_pre'] = df_home['elo1_pre']
+    df_home['opp_elo_pre'] = df_home['elo2_pre']
     
-    # 7. Rest Advantage
+    # Join where our team is Team2 (Away)
+    df_away = df[df['team_home_away'] == 'away'].merge(
+        elo_clean, 
+        left_on=['game_date', 'neil_team', 'neil_opp'],
+        right_on=['date', 'team2', 'team1'],
+        how='inner'
+    )
+    df_away['my_elo_pre'] = df_away['elo2_pre']
+    df_away['opp_elo_pre'] = df_away['elo1_pre']
+    
+    # Recombine
+    df = pd.concat([df_home, df_away]).sort_values(['team_id', 'game_date'])
+    
+    # 3. Elo-based Features
+    df['elo_diff'] = df['my_elo_pre'] - df['opp_elo_pre']
+    df['elo_advantage'] = df['elo_diff'] / 100 # Scaled for model stability
+    
+    # 4. Playoff Context Logic
+    # In playoffs, rest advantage and travel impact are often mitigated by series focus
+    df['is_playoffs'] = df['playoff'].fillna(0).astype(int)
+    
+    # 5. Rest Advantage
     # We need the opponent's days_rest_capped for the same game_id
     opp_rest_df = df[['game_id', 'team_id', 'days_rest_capped']].rename(
         columns={'team_id': 'opponent_team_id', 'days_rest_capped': 'opp_rest'}
@@ -207,31 +168,20 @@ def add_external_features(df, elo_df):
     df = df.merge(opp_rest_df, on=['game_id', 'opponent_team_id'], how='left')
     
     df['rest_advantage'] = df['days_rest_capped'] - df['opp_rest']
-    df['elo_opp_scaled'] = df['elo2_pre'] / 100
     
-    # 8. NBA Cup Indicators (In-Season Tournament)
-    df['month'] = df['game_date'].dt.month
-    df['wday_num'] = df['game_date'].dt.dayofweek # Mon=0, Fri=4, Tue=1
+    # In playoffs, B2Bs don't exist, but "rest advantage" can come from series length
+    # We'll keep the column but acknowledge it might be 0 for most playoff games.
     
+    # 6. NBA Cup Indicators (In-Season Tournament - Regular Season Only)
+    df['wday_num'] = df['game_date'].dt.dayofweek 
     df['is_nba_cup_group'] = 0
     
-    # 2024 Cup (Nov 3 - Dec 9, Tuesdays (1) & Fridays (4))
-    mask_2024 = (
-        (df['season'] == 2024) & 
-        (df['game_date'] >= '2023-11-03') & 
-        (df['game_date'] <= '2023-12-09') & 
-        (df['wday_num'].isin([1, 4]))
-    )
-    df.loc[mask_2024, 'is_nba_cup_group'] = 1
+    mask_cup = (
+        ((df['season'] == 2024) & (df['game_date'].between('2023-11-03', '2023-12-09'))) |
+        ((df['season'] == 2025) & (df['game_date'].between('2024-11-12', '2024-12-17')))
+    ) & (df['wday_num'].isin([1, 4])) & (df['is_playoffs'] == 0)
     
-    # 2025 Cup (Nov 12 - Dec 17, Tuesdays (1) & Fridays (4))
-    mask_2025 = (
-        (df['season'] == 2025) & 
-        (df['game_date'] >= '2024-11-12') & 
-        (df['game_date'] <= '2024-12-17') & 
-        (df['wday_num'].isin([1, 4]))
-    )
-    df.loc[mask_2025, 'is_nba_cup_group'] = 1
+    df.loc[mask_cup, 'is_nba_cup_group'] = 1
     
     return df
 
@@ -240,9 +190,35 @@ def add_external_features(df, elo_df):
 # ==============================================================================
 
 if __name__ == "__main__":
-    # Example usage:
-    # df_raw = pd.read_csv("data/raw/nba_box_scores.csv")
-    # elo_df = fetch_elo_data()
-    # df_processed = calculate_pregame_features(df_raw)
-    # df_final = add_external_features(df_processed, elo_df)
-    print("Pregame Feature Engineering script loaded.")
+    # Lightweight functional test with mock data
+    print("RUNNING LIGHTWEIGHT PREGAME TEST...")
+    mock_data = pd.DataFrame({
+        'team_id': [1610612738, 1610612744], # Celtics, Warriors
+        'team_abbreviation': ['BOS', 'GS'],
+        'opponent_team_id': [1610612744, 1610612738],
+        'game_id': ['0022300001', '0022300001'],
+        'game_date': ['2023-10-24', '2023-10-24'],
+        'season': [2024, 2024],
+        'team_home_away': ['home', 'away'],
+        'team_score': [108, 104],
+        'opponent_team_score': [104, 108],
+        'field_goals_attempted': [88, 92],
+        'free_throws_attempted': [20, 25],
+        'offensive_rebounds': [10, 12],
+        'turnovers': [15, 13]
+    })
+    
+    # 1. Test basic features
+    df_pre = calculate_pregame_features(mock_data)
+    print(f"Features calculated: {df_pre.columns.tolist()[:10]}...")
+    
+    # 2. Test external features (Requires actual Elo data for realistic join)
+    try:
+        elo_df = fetch_elo_data()
+        if not elo_df.empty:
+            df_final = add_external_features(df_pre, elo_df.head(1000)) # Small subset
+            print(f"Final features (with Elo): {df_final[['my_elo_pre', 'elo_advantage', 'is_playoffs']].iloc[0].to_dict()}")
+    except Exception as e:
+        print(f"Elo join test skipped or failed: {e}")
+    
+    print("Test complete.")
