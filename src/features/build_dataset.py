@@ -186,6 +186,8 @@ if __name__ == "__main__":
         # Verify a few rows
         sample_cols = [
             'GAME_ID', 'seconds_remaining_in_game', 'score_differential', 
+            'home_timeouts_remaining', 'away_timeouts_remaining',
+            'home_team_fouls', 'away_team_fouls', 'home_in_bonus', 'away_in_bonus',
             'home_points_last_3_mins', 'away_points_last_3_mins', 'momentum_differential',
             'possession_team_id', 'elo_advantage', 'home_win'
         ]

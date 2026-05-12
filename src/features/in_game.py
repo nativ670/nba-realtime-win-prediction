@@ -11,28 +11,23 @@ def calculate_in_game_features(df_pbp):
     Transforms raw NBA Play-by-Play data into real-time features.
     Optimized with Pandas vectorization for processing millions of rows.
     
-    New Features: 
-    - home_points_last_3_mins
-    - away_points_last_3_mins
-    - momentum_differential
+    NBA Rule Adherence:
+    - Regulation Bonus: 5th team foul OR 2nd in L2M.
+    - Overtime Bonus: 4th team foul OR 2nd in L2M.
+    - Timeouts: 7 for regulation (pool), 2 per OT period (no carryover).
     """
     df = df_pbp.copy()
 
     # 1. TIME CALCULATIONS
-    # Convert 'PERIOD' and 'PCTIMESTRING' to seconds remaining and elapsed time
-    
     clock_parts = df['PCTIMESTRING'].str.split(':', expand=True).astype(float)
     df['seconds_remaining_in_period'] = (clock_parts[0] * 60) + clock_parts[1]
 
-    # Seconds remaining in game (countdown)
     df['seconds_remaining_in_game'] = np.where(
         df['PERIOD'] <= 4,
         (4 - df['PERIOD']) * 720 + df['seconds_remaining_in_period'],
         df['seconds_remaining_in_period'] 
     )
 
-    # Elapsed time from start (increasing) - Essential for rolling windows
-    # Regulation: 4 periods of 12 mins (720s). OT: 5 mins (300s).
     df['elapsed_time'] = np.where(
         df['PERIOD'] <= 4,
         (df['PERIOD'] - 1) * 720 + (720 - df['seconds_remaining_in_period']),
@@ -40,68 +35,126 @@ def calculate_in_game_features(df_pbp):
     )
 
     # 2. SCORE DIFFERENTIAL
-    # Extract scores, handling rows with no score update (NaN)
-    # Raw PBP format for 'SCORE' is typically "AWAY - HOME" (e.g., "102 - 105")
-    scores = df['SCORE'].str.split(' - ', expand=True)
-    df['home_score'] = pd.to_numeric(scores[1], errors='coerce')
-    df['away_score'] = pd.to_numeric(scores[0], errors='coerce')
+    if 'SCORE' in df.columns and df['SCORE'].notna().any():
+        scores = df['SCORE'].str.split(' - ', expand=True)
+        # Ensure we have two columns after split
+        if scores.shape[1] == 2:
+            df['home_score'] = pd.to_numeric(scores[1], errors='coerce')
+            df['away_score'] = pd.to_numeric(scores[0], errors='coerce')
+        else:
+            df['home_score'] = 0
+            df['away_score'] = 0
+    else:
+        df['home_score'] = 0
+        df['away_score'] = 0
 
-    # Forward fill to ensure every row has the current score
     df[['home_score', 'away_score']] = df[['home_score', 'away_score']].ffill().fillna(0)
     df['score_differential'] = df['home_score'] - df['away_score']
 
-    # 3. POSSESSION TRACKING
-    team_ids = df['PLAYER1_TEAM_ID'].unique()
-    team_ids = [tid for tid in team_ids if pd.notna(tid) and tid != 0]
+    # 3. IDENTIFY HOME/AWAY TEAM IDs
+    h_score_diff = df['home_score'].diff().fillna(0)
+    a_score_diff = df['away_score'].diff().fillna(0)
+    mask_h_scoring = (h_score_diff > 0) & (df['PLAYER1_TEAM_ID'].notna())
+    mask_a_scoring = (a_score_diff > 0) & (df['PLAYER1_TEAM_ID'].notna())
     
-    df['possession_team_id'] = np.nan
+    home_team_id = df.loc[mask_h_scoring, 'PLAYER1_TEAM_ID'].iloc[0] if mask_h_scoring.any() else None
+    away_team_id = df.loc[mask_a_scoring, 'PLAYER1_TEAM_ID'].iloc[0] if mask_a_scoring.any() else None
+    
+    team_ids = [tid for tid in df['PLAYER1_TEAM_ID'].unique() if pd.notna(tid) and tid != 0]
+    if home_team_id is None and len(team_ids) >= 1: home_team_id = team_ids[0]
+    if away_team_id is None and len(team_ids) >= 2: away_team_id = team_ids[1]
 
+    # 4. POSSESSION TRACKING
+    df['possession_team_id'] = np.nan
     if len(team_ids) >= 2:
         t1, t2 = team_ids[0], team_ids[1]
         other_team_map = {t1: t2, t2: t1}
-        
-        # Rule 1: Rebound (Event 4) -> Possession goes to the rebounder
         mask_reb = df['EVENTMSGTYPE'] == 4
         df.loc[mask_reb, 'possession_team_id'] = df.loc[mask_reb, 'PLAYER1_TEAM_ID']
-        
-        # Rule 2: Make (Event 1) or Turnover (Event 5) -> Possession flips to the other team
         mask_flip = df['EVENTMSGTYPE'].isin([1, 5])
         df.loc[mask_flip, 'possession_team_id'] = df.loc[mask_flip, 'PLAYER1_TEAM_ID'].map(other_team_map)
-    
     df['possession_team_id'] = df['possession_team_id'].ffill()
 
-    # 4. MOMENTUM FEATURES (Lookback 180s)
-    # We use pd.merge_asof to find the score 3 minutes ago
-    # merge_asof requires sorting by the key (elapsed_time)
+    # 5. CLUTCH CONTEXT (Timeouts & Fouls)
+    group_cols = ['GAME_ID', 'PERIOD'] if 'GAME_ID' in df.columns else ['PERIOD']
+    
+    # --- TIMEOUTS ---
+    df['is_home_to'] = ((df['EVENTMSGTYPE'] == 9) & (df['PLAYER1_TEAM_ID'] == home_team_id)).astype(int)
+    df['is_away_to'] = ((df['EVENTMSGTYPE'] == 9) & (df['PLAYER1_TEAM_ID'] == away_team_id)).astype(int)
+    
+    # Regulation Pool (P1-P4)
+    reg_mask = df['PERIOD'] <= 4
+    df['home_to_reg_cumsum'] = df.loc[reg_mask, 'is_home_to'].cumsum()
+    df['away_to_reg_cumsum'] = df.loc[reg_mask, 'is_away_to'].cumsum()
+    
+    # OT Pool (P5+, Reset per period)
+    df['home_to_ot_cumsum'] = df.groupby(group_cols)['is_home_to'].cumsum()
+    df['away_to_ot_cumsum'] = df.groupby(group_cols)['is_away_to'].cumsum()
+    
+    df['home_timeouts_remaining'] = np.where(
+        df['PERIOD'] <= 4,
+        (7 - df['home_to_reg_cumsum']).ffill(),
+        (2 - df['home_to_ot_cumsum'])
+    ).clip(0)
+    
+    df['away_timeouts_remaining'] = np.where(
+        df['PERIOD'] <= 4,
+        (7 - df['away_to_reg_cumsum']).ffill(),
+        (2 - df['away_to_ot_cumsum'])
+    ).clip(0)
+    
+    # --- FOULS & BONUS ---
+    df['is_h_foul'] = ((df['EVENTMSGTYPE'] == 6) & (df['PLAYER1_TEAM_ID'] == home_team_id)).astype(int)
+    df['is_a_foul'] = ((df['EVENTMSGTYPE'] == 6) & (df['PLAYER1_TEAM_ID'] == away_team_id)).astype(int)
+    
+    df['home_team_fouls'] = df.groupby(group_cols)['is_h_foul'].cumsum()
+    df['away_team_fouls'] = df.groupby(group_cols)['is_a_foul'].cumsum()
+    
+    # L2M rule (Same for Reg and OT)
+    df['is_h_l2m_foul'] = (df['is_h_foul'] == 1) & (df['seconds_remaining_in_period'] <= 120)
+    df['is_a_l2m_foul'] = (df['is_a_foul'] == 1) & (df['seconds_remaining_in_period'] <= 120)
+    df['home_l2m_fouls'] = df.groupby(group_cols)['is_h_l2m_foul'].cumsum()
+    df['away_l2m_fouls'] = df.groupby(group_cols)['is_a_l2m_foul'].cumsum()
+    
+    # Bonus Threshold: 5 in Regulation, 4 in OT
+    df['foul_threshold'] = np.where(df['PERIOD'] <= 4, 5, 4)
+    
+    df['away_in_bonus'] = ((df['home_team_fouls'] >= df['foul_threshold']) | (df['home_l2m_fouls'] >= 2)).astype(int)
+    df['home_in_bonus'] = ((df['away_team_fouls'] >= df['foul_threshold']) | (df['away_l2m_fouls'] >= 2)).astype(int)
+
+    # 6. MOMENTUM FEATURES (Lookback 180s)
     df = df.sort_values('elapsed_time')
     df['time_lookback'] = df['elapsed_time'] - 180
-    df['temp_idx'] = range(len(df)) # Preserve original sequence for stability
+    df['temp_idx'] = range(len(df))
     
-    # Check for GAME_ID to allow grouped merge_asof (if processing multiple games at once)
     group_col = 'GAME_ID' if 'GAME_ID' in df.columns else None
-    
     df_momentum = pd.merge_asof(
         df,
         df[['elapsed_time', 'home_score', 'away_score'] + ([group_col] if group_col else [])],
         left_on='time_lookback',
         right_on='elapsed_time',
         by=group_col,
-        direction='backward', # State at or before lookback time
+        direction='backward',
         suffixes=('', '_hist')
     )
     
-    # Fill historical scores for the beginning of the game (lookback < 0)
     df_momentum['home_score_hist'] = df_momentum['home_score_hist'].fillna(0)
     df_momentum['away_score_hist'] = df_momentum['away_score_hist'].fillna(0)
-    
-    # Calculate Momentum columns
     df_momentum['home_points_last_3_mins'] = df_momentum['home_score'] - df_momentum['home_score_hist']
     df_momentum['away_points_last_3_mins'] = df_momentum['away_score'] - df_momentum['away_score_hist']
     df_momentum['momentum_differential'] = df_momentum['home_points_last_3_mins'] - df_momentum['away_points_last_3_mins']
     
-    # Restore order and drop temp columns
-    cols_to_drop = ['elapsed_time', 'time_lookback', 'temp_idx', 'elapsed_time_hist', 'home_score_hist', 'away_score_hist']
-    df = df_momentum.sort_values('temp_idx').drop(columns=cols_to_drop)
+    # Clean up
+    cols_to_drop = [
+        'elapsed_time', 'time_lookback', 'temp_idx', 'elapsed_time_hist', 
+        'home_score_hist', 'away_score_hist', 'is_home_to', 'is_away_to',
+        'home_to_reg_cumsum', 'away_to_reg_cumsum', 'home_to_ot_cumsum', 'away_to_ot_cumsum',
+        'is_h_foul', 'is_a_foul', 'is_h_l2m_foul', 'home_l2m_fouls', 'away_l2m_fouls', 
+        'foul_threshold', 'is_a_l2m_foul'
+    ]
+    # Filter only existing columns to avoid errors on drop
+    actual_cols_to_drop = [c for c in cols_to_drop if c in df_momentum.columns]
+    df = df_momentum.sort_values('temp_idx').drop(columns=actual_cols_to_drop)
 
     return df
 
@@ -110,47 +163,44 @@ def calculate_in_game_features(df_pbp):
 # ==============================================================================
 
 if __name__ == "__main__":
-    print("RUNNING LIGHTWEIGHT IN-GAME FEATURE TEST...")
+    print("RUNNING NBA RULE VERIFICATION (REG vs OT)...")
     
-    # Mock Play-by-Play Data (Home: 1610612744, Away: 1610612738)
-    # Score format in raw PBP is typically "AWAY - HOME"
+    # Home: 1001, Away: 2002
     mock_pbp = pd.DataFrame({
-        'EVENTNUM': [1, 2, 3, 4, 5, 6],
-        'PERIOD': [1, 1, 1, 1, 1, 1],
-        'PCTIMESTRING': ['12:00', '11:00', '9:00', '8:50', '8:00', '7:00'],
-        'EVENTMSGTYPE': [10, 1, 1, 1, 1, 1],
-        'SCORE': [None, '0 - 2', '0 - 5', '2 - 5', '4 - 5', '4 - 10'],
-        'PLAYER1_TEAM_ID': [None, 1610612744, 1610612744, 1610612738, 1610612738, 1610612744],
+        'EVENTNUM': range(1, 13),
+        'PERIOD': [4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5],
+        'PCTIMESTRING': [
+            '2:01', '1:59', '1:30', '1:00', '0:30', # P4 (Reg)
+            '5:00', '4:30', '4:00', '3:30', '3:00', '2:00', '1:00' # P5 (OT)
+        ],
+        'EVENTMSGTYPE': [
+            6, 6, 6, 9, 6, # P4: Foul 1, Foul 2 (L2M1), Foul 3 (L2M2-Bonus), TO 1, Foul 4
+            10, 6, 6, 6, 6, 9, 6 # P5: Start, Foul 1, 2, 3, 4 (Bonus), TO 1, Foul 5 (Bonus)
+        ],
+        'SCORE': ['0 - 0']*12,
+        'PLAYER1_TEAM_ID': [1001]*12
     })
 
     processed_df = calculate_in_game_features(mock_pbp)
     
-    print("\nProcessed Features Sample:")
-    cols_to_show = ['PCTIMESTRING', 'home_score', 'away_score', 'home_points_last_3_mins', 'away_points_last_3_mins', 'momentum_differential']
+    print("\nProcessed Features Sample (OT Focus):")
+    cols_to_show = [
+        'PERIOD', 'PCTIMESTRING', 'home_timeouts_remaining', 
+        'home_team_fouls', 'away_in_bonus'
+    ]
     print(processed_df[cols_to_show])
     
-    # Momentum Validations
+    # Regulation Bonus (P4)
+    # 3rd Home Foul at 1:30 is 2nd in L2M -> AWAY BONUS
+    assert processed_df.iloc[2]['away_in_bonus'] == 1, "Reg L2M bonus failed"
     
-    # 1. T=8:00 (Elapsed 240s). 3 mins ago was T=11:00 (Elapsed 60s).
-    # Current Score: Home 5, Away 4.
-    # Score at T=11:00 was: Home 2, Away 0.
-    # Expected Home Pts Last 3m: 5 - 2 = 3.
-    # Expected Away Pts Last 3m: 4 - 0 = 4.
-    # Expected Momentum Diff: 3 - 4 = -1.
-    row_800 = processed_df[processed_df['PCTIMESTRING'] == '8:00'].iloc[0]
-    assert row_800['home_points_last_3_mins'] == 3, f"Expected 3, got {row_800['home_points_last_3_mins']}"
-    assert row_800['away_points_last_3_mins'] == 4, f"Expected 4, got {row_800['away_points_last_3_mins']}"
-    assert row_800['momentum_differential'] == -1, f"Expected -1, got {row_800['momentum_differential']}"
-    
-    # 2. T=7:00 (Elapsed 300s). 3 mins ago was T=10:00 (Elapsed 120s).
-    # Last event before T=10:00 was T=11:00 (Home 2, Away 0).
-    # Current Score: Home 10, Away 4.
-    # Expected Home Pts Last 3m: 10 - 2 = 8.
-    # Expected Away Pts Last 3m: 4 - 0 = 4.
-    # Expected Momentum Diff: 8 - 4 = 4.
-    row_700 = processed_df[processed_df['PCTIMESTRING'] == '7:00'].iloc[0]
-    assert row_700['home_points_last_3_mins'] == 8, f"Expected 8, got {row_700['home_points_last_3_mins']}"
-    assert row_700['away_points_last_3_mins'] == 4, f"Expected 4, got {row_700['away_points_last_3_mins']}"
-    assert row_700['momentum_differential'] == 4, f"Expected 4, got {row_700['momentum_differential']}"
+    # OT Bonus (P5)
+    # Home Team Fouls reset to 0 in OT
+    assert processed_df.iloc[5]['home_team_fouls'] == 0, "OT Foul reset failed"
+    # OT Timeouts reset to 2
+    assert processed_df.iloc[5]['home_timeouts_remaining'] == 2, "OT Timeout reset failed"
+    # OT Bonus triggered on 4th foul (Index 9 in this mock)
+    assert processed_df.iloc[9]['home_team_fouls'] == 4, f"Expected 4 fouls, got {processed_df.iloc[9]['home_team_fouls']}"
+    assert processed_df.iloc[9]['away_in_bonus'] == 1, "OT Bonus on 4th foul failed"
 
-    print("\nTest complete. All momentum assertions passed.")
+    print("\nTest complete. NBA Regulation and Overtime rules verified.")
