@@ -53,18 +53,33 @@ def calculate_in_game_features(df_pbp):
     df['score_differential'] = df['home_score'] - df['away_score']
 
     # 3. POSSESSION TRACKING (Heuristic-based)
-    # We infer possession based on the last 'PLAYER1_TEAM_ID' involved in a 
-    # possession-defining event (Rebound, Turnover, Made Shot).
-    
-    # Identify events that define possession
-    # EVENTMSGTYPE: 1=Make, 2=Miss, 3=FT, 4=Rebound, 5=Turnover, 6=Foul...
-    possession_events = [1, 2, 4, 5] 
+    # Identify the two teams in the game to handle possession flips
+    # We filter out 0/None and get unique IDs
+    team_ids = df['PLAYER1_TEAM_ID'].unique()
+    team_ids = [tid for tid in team_ids if pd.notna(tid) and tid != 0]
     
     df['possession_team_id'] = np.nan
-    mask = df['EVENTMSGTYPE'].isin(possession_events)
-    df.loc[mask, 'possession_team_id'] = df.loc[mask, 'PLAYER1_TEAM_ID']
+
+    if len(team_ids) >= 2:
+        # Map each team to its opponent
+        t1, t2 = team_ids[0], team_ids[1]
+        other_team_map = {t1: t2, t2: t1}
+        
+        # Rule 1: Rebound (Event 4) -> Possession goes to the rebounder
+        mask_reb = df['EVENTMSGTYPE'] == 4
+        df.loc[mask_reb, 'possession_team_id'] = df.loc[mask_reb, 'PLAYER1_TEAM_ID']
+        
+        # Rule 2: Make (Event 1) or Turnover (Event 5) -> Possession flips to the other team
+        mask_flip = df['EVENTMSGTYPE'].isin([1, 5])
+        df.loc[mask_flip, 'possession_team_id'] = df.loc[mask_flip, 'PLAYER1_TEAM_ID'].map(other_team_map)
+    else:
+        # Fallback for edge cases where 2 teams aren't yet identified
+        # (e.g., very start of a partial dataset)
+        possession_events = [1, 2, 4, 5]
+        mask = df['EVENTMSGTYPE'].isin(possession_events)
+        df.loc[mask, 'possession_team_id'] = df.loc[mask, 'PLAYER1_TEAM_ID']
     
-    # Forward fill possession
+    # Forward fill possession to keep it until the next defining event
     df['possession_team_id'] = df['possession_team_id'].ffill()
 
     return df
@@ -99,5 +114,15 @@ if __name__ == "__main__":
     assert processed_df.iloc[1]['away_score'] == 2, "Score parsing failed"
     assert processed_df.iloc[2]['away_score'] == 2, "Score forward-fill failed"
     assert processed_df.iloc[0]['seconds_remaining_in_game'] == 2880, "Time calculation failed"
+    
+    # Possession Validations
+    # Index 1: Team 1610612738 makes shot -> Possession flips to 1610612744
+    assert processed_df.iloc[1]['possession_team_id'] == 1610612744, "Possession flip on Make failed"
+    
+    # Index 2: Team 1610612738 rebounds -> Possession goes to 1610612738
+    assert processed_df.iloc[2]['possession_team_id'] == 1610612738, "Possession on Rebound failed"
+    
+    # Index 4: Team 1610612744 turnovers -> Possession flips to 1610612738
+    assert processed_df.iloc[4]['possession_team_id'] == 1610612738, "Possession flip on Turnover failed"
     
     print("\nTest complete. All assertions passed.")
