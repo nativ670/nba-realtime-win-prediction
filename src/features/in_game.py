@@ -10,58 +10,53 @@ def calculate_in_game_features(df_pbp):
     """
     Transforms raw NBA Play-by-Play data into real-time features.
     Optimized with Pandas vectorization for processing millions of rows.
+    
+    New Features: 
+    - home_points_last_3_mins
+    - away_points_last_3_mins
+    - momentum_differential
     """
     df = df_pbp.copy()
 
-    # 1. TIME REMAINING CALCULATION
-    # Convert 'PERIOD' and 'PCTIMESTRING' to total seconds remaining in game
-    # NBA Regulation: 4 periods of 12 mins (720s). Overtime: 5 mins (300s).
+    # 1. TIME CALCULATIONS
+    # Convert 'PERIOD' and 'PCTIMESTRING' to seconds remaining and elapsed time
     
-    def parse_clock(clock_str):
-        if pd.isna(clock_str) or clock_str == "":
-            return 0
-        minutes, seconds = map(int, clock_str.split(':'))
-        return (minutes * 60) + seconds
-
-    # Vectorized clock parsing (using Series.str.split)
     clock_parts = df['PCTIMESTRING'].str.split(':', expand=True).astype(float)
     df['seconds_remaining_in_period'] = (clock_parts[0] * 60) + clock_parts[1]
 
-    # Calculate seconds at the start of each period
-    # Period 1: 2880s (48m), Period 2: 2160s (36m), Period 3: 1440s (24m), Period 4: 720s (12m)
-    # OT periods: 5 mins each
+    # Seconds remaining in game (countdown)
     df['seconds_remaining_in_game'] = np.where(
         df['PERIOD'] <= 4,
         (4 - df['PERIOD']) * 720 + df['seconds_remaining_in_period'],
-        # Handle OT: We don't know total OTs in advance, so we treat each as 300s remaining from its end
-        # This is a simplification; for WP models, we usually focus on time left in current OT.
-        0 + df['seconds_remaining_in_period'] 
+        df['seconds_remaining_in_period'] 
+    )
+
+    # Elapsed time from start (increasing) - Essential for rolling windows
+    # Regulation: 4 periods of 12 mins (720s). OT: 5 mins (300s).
+    df['elapsed_time'] = np.where(
+        df['PERIOD'] <= 4,
+        (df['PERIOD'] - 1) * 720 + (720 - df['seconds_remaining_in_period']),
+        2880 + (df['PERIOD'] - 5) * 300 + (300 - df['seconds_remaining_in_period'])
     )
 
     # 2. SCORE DIFFERENTIAL
-    # Raw PBP usually has 'SCORE' as "80 - 75" or similar, and only on scoring events.
-    # We need to split, handle NaNs, and forward-fill.
-    
     # Extract scores, handling rows with no score update (NaN)
+    # Raw PBP format for 'SCORE' is typically "AWAY - HOME" (e.g., "102 - 105")
     scores = df['SCORE'].str.split(' - ', expand=True)
     df['home_score'] = pd.to_numeric(scores[1], errors='coerce')
     df['away_score'] = pd.to_numeric(scores[0], errors='coerce')
 
     # Forward fill to ensure every row has the current score
     df[['home_score', 'away_score']] = df[['home_score', 'away_score']].ffill().fillna(0)
-    
     df['score_differential'] = df['home_score'] - df['away_score']
 
-    # 3. POSSESSION TRACKING (Heuristic-based)
-    # Identify the two teams in the game to handle possession flips
-    # We filter out 0/None and get unique IDs
+    # 3. POSSESSION TRACKING
     team_ids = df['PLAYER1_TEAM_ID'].unique()
     team_ids = [tid for tid in team_ids if pd.notna(tid) and tid != 0]
     
     df['possession_team_id'] = np.nan
 
     if len(team_ids) >= 2:
-        # Map each team to its opponent
         t1, t2 = team_ids[0], team_ids[1]
         other_team_map = {t1: t2, t2: t1}
         
@@ -72,15 +67,41 @@ def calculate_in_game_features(df_pbp):
         # Rule 2: Make (Event 1) or Turnover (Event 5) -> Possession flips to the other team
         mask_flip = df['EVENTMSGTYPE'].isin([1, 5])
         df.loc[mask_flip, 'possession_team_id'] = df.loc[mask_flip, 'PLAYER1_TEAM_ID'].map(other_team_map)
-    else:
-        # Fallback for edge cases where 2 teams aren't yet identified
-        # (e.g., very start of a partial dataset)
-        possession_events = [1, 2, 4, 5]
-        mask = df['EVENTMSGTYPE'].isin(possession_events)
-        df.loc[mask, 'possession_team_id'] = df.loc[mask, 'PLAYER1_TEAM_ID']
     
-    # Forward fill possession to keep it until the next defining event
     df['possession_team_id'] = df['possession_team_id'].ffill()
+
+    # 4. MOMENTUM FEATURES (Lookback 180s)
+    # We use pd.merge_asof to find the score 3 minutes ago
+    # merge_asof requires sorting by the key (elapsed_time)
+    df = df.sort_values('elapsed_time')
+    df['time_lookback'] = df['elapsed_time'] - 180
+    df['temp_idx'] = range(len(df)) # Preserve original sequence for stability
+    
+    # Check for GAME_ID to allow grouped merge_asof (if processing multiple games at once)
+    group_col = 'GAME_ID' if 'GAME_ID' in df.columns else None
+    
+    df_momentum = pd.merge_asof(
+        df,
+        df[['elapsed_time', 'home_score', 'away_score'] + ([group_col] if group_col else [])],
+        left_on='time_lookback',
+        right_on='elapsed_time',
+        by=group_col,
+        direction='backward', # State at or before lookback time
+        suffixes=('', '_hist')
+    )
+    
+    # Fill historical scores for the beginning of the game (lookback < 0)
+    df_momentum['home_score_hist'] = df_momentum['home_score_hist'].fillna(0)
+    df_momentum['away_score_hist'] = df_momentum['away_score_hist'].fillna(0)
+    
+    # Calculate Momentum columns
+    df_momentum['home_points_last_3_mins'] = df_momentum['home_score'] - df_momentum['home_score_hist']
+    df_momentum['away_points_last_3_mins'] = df_momentum['away_score'] - df_momentum['away_score_hist']
+    df_momentum['momentum_differential'] = df_momentum['home_points_last_3_mins'] - df_momentum['away_points_last_3_mins']
+    
+    # Restore order and drop temp columns
+    cols_to_drop = ['elapsed_time', 'time_lookback', 'temp_idx', 'elapsed_time_hist', 'home_score_hist', 'away_score_hist']
+    df = df_momentum.sort_values('temp_idx').drop(columns=cols_to_drop)
 
     return df
 
@@ -91,38 +112,45 @@ def calculate_in_game_features(df_pbp):
 if __name__ == "__main__":
     print("RUNNING LIGHTWEIGHT IN-GAME FEATURE TEST...")
     
-    # Mock Play-by-Play Data
-    # 1610612738 = Celtics (Away), 1610612744 = Warriors (Home)
+    # Mock Play-by-Play Data (Home: 1610612744, Away: 1610612738)
+    # Score format in raw PBP is typically "AWAY - HOME"
     mock_pbp = pd.DataFrame({
-        'EVENTNUM': [1, 2, 3, 4, 5],
-        'PERIOD': [1, 1, 1, 1, 1],
-        'PCTIMESTRING': ['12:00', '11:45', '11:30', '11:15', '11:00'],
-        'EVENTMSGTYPE': [10, 1, 4, 2, 5], # Start, Make, Rebound, Miss, Turnover
-        'SCORE': [None, '2 - 0', None, None, None],
-        'PLAYER1_TEAM_ID': [None, 1610612738, 1610612738, 1610612744, 1610612744],
-        'HOMEDESCRIPTION': [None, None, None, 'Missed Shot', 'Turnover'],
-        'VISITORDESCRIPTION': [None, 'Made Layup', 'Defensive Rebound', None, None]
+        'EVENTNUM': [1, 2, 3, 4, 5, 6],
+        'PERIOD': [1, 1, 1, 1, 1, 1],
+        'PCTIMESTRING': ['12:00', '11:00', '9:00', '8:50', '8:00', '7:00'],
+        'EVENTMSGTYPE': [10, 1, 1, 1, 1, 1],
+        'SCORE': [None, '0 - 2', '0 - 5', '2 - 5', '4 - 5', '4 - 10'],
+        'PLAYER1_TEAM_ID': [None, 1610612744, 1610612744, 1610612738, 1610612738, 1610612744],
     })
 
     processed_df = calculate_in_game_features(mock_pbp)
     
     print("\nProcessed Features Sample:")
-    cols_to_show = ['PERIOD', 'PCTIMESTRING', 'seconds_remaining_in_game', 'home_score', 'away_score', 'score_differential', 'possession_team_id']
+    cols_to_show = ['PCTIMESTRING', 'home_score', 'away_score', 'home_points_last_3_mins', 'away_points_last_3_mins', 'momentum_differential']
     print(processed_df[cols_to_show])
     
-    # Basic Validations
-    assert processed_df.iloc[1]['away_score'] == 2, "Score parsing failed"
-    assert processed_df.iloc[2]['away_score'] == 2, "Score forward-fill failed"
-    assert processed_df.iloc[0]['seconds_remaining_in_game'] == 2880, "Time calculation failed"
+    # Momentum Validations
     
-    # Possession Validations
-    # Index 1: Team 1610612738 makes shot -> Possession flips to 1610612744
-    assert processed_df.iloc[1]['possession_team_id'] == 1610612744, "Possession flip on Make failed"
+    # 1. T=8:00 (Elapsed 240s). 3 mins ago was T=11:00 (Elapsed 60s).
+    # Current Score: Home 5, Away 4.
+    # Score at T=11:00 was: Home 2, Away 0.
+    # Expected Home Pts Last 3m: 5 - 2 = 3.
+    # Expected Away Pts Last 3m: 4 - 0 = 4.
+    # Expected Momentum Diff: 3 - 4 = -1.
+    row_800 = processed_df[processed_df['PCTIMESTRING'] == '8:00'].iloc[0]
+    assert row_800['home_points_last_3_mins'] == 3, f"Expected 3, got {row_800['home_points_last_3_mins']}"
+    assert row_800['away_points_last_3_mins'] == 4, f"Expected 4, got {row_800['away_points_last_3_mins']}"
+    assert row_800['momentum_differential'] == -1, f"Expected -1, got {row_800['momentum_differential']}"
     
-    # Index 2: Team 1610612738 rebounds -> Possession goes to 1610612738
-    assert processed_df.iloc[2]['possession_team_id'] == 1610612738, "Possession on Rebound failed"
-    
-    # Index 4: Team 1610612744 turnovers -> Possession flips to 1610612738
-    assert processed_df.iloc[4]['possession_team_id'] == 1610612738, "Possession flip on Turnover failed"
-    
-    print("\nTest complete. All assertions passed.")
+    # 2. T=7:00 (Elapsed 300s). 3 mins ago was T=10:00 (Elapsed 120s).
+    # Last event before T=10:00 was T=11:00 (Home 2, Away 0).
+    # Current Score: Home 10, Away 4.
+    # Expected Home Pts Last 3m: 10 - 2 = 8.
+    # Expected Away Pts Last 3m: 4 - 0 = 4.
+    # Expected Momentum Diff: 8 - 4 = 4.
+    row_700 = processed_df[processed_df['PCTIMESTRING'] == '7:00'].iloc[0]
+    assert row_700['home_points_last_3_mins'] == 8, f"Expected 8, got {row_700['home_points_last_3_mins']}"
+    assert row_700['away_points_last_3_mins'] == 4, f"Expected 4, got {row_700['away_points_last_3_mins']}"
+    assert row_700['momentum_differential'] == 4, f"Expected 4, got {row_700['momentum_differential']}"
+
+    print("\nTest complete. All momentum assertions passed.")

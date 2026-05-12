@@ -184,6 +184,10 @@ if __name__ == "__main__":
         print(f"Home Win Distribution:\n{full_df['home_win'].value_counts(normalize=True)}")
         
         # Verify a few rows
-        sample_cols = ['GAME_ID', 'seconds_remaining_in_game', 'score_differential', 'possession_team_id', 'elo_advantage', 'home_win']
+        sample_cols = [
+            'GAME_ID', 'seconds_remaining_in_game', 'score_differential', 
+            'home_points_last_3_mins', 'away_points_last_3_mins', 'momentum_differential',
+            'possession_team_id', 'elo_advantage', 'home_win'
+        ]
         print("\nSample Rows:")
         print(full_df[sample_cols].head())
