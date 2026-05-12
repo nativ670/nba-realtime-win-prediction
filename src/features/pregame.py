@@ -102,8 +102,11 @@ def calculate_pregame_features(df_raw):
     # For now, we prioritize the Bubble as it impacts hundreds of games.
 
     # 5. Determine Game Location Coordinates (for non-bubble games)
-    df['game_lat'] = df['game_lat'].fillna(np.where(df['team_home_away'] == 'home', df['my_home_lat'], df['opp_home_lat']))
-    df['game_lon'] = df['game_lon'].fillna(np.where(df['team_home_away'] == 'home', df['my_home_lon'], df['opp_home_lon']))
+    default_lat = pd.Series(np.where(df['team_home_away'] == 'home', df['my_home_lat'], df['opp_home_lat']), index=df.index)
+    default_lon = pd.Series(np.where(df['team_home_away'] == 'home', df['my_home_lon'], df['opp_home_lon']), index=df.index)
+    
+    df['game_lat'] = df['game_lat'].fillna(default_lat)
+    df['game_lon'] = df['game_lon'].fillna(default_lon)
 
     # 6. Time and Travel Features (Vectorized GroupBy)
     df = df.sort_values(['team_id', 'game_date'])
