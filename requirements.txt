@@ -6,5 +6,8 @@ nba_api
 scikit-learn
 xgboost
 matplotlib
+fastapi
+uvicorn
+pydantic
 ipykernel
 pyarrow
