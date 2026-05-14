@@ -47,8 +47,8 @@ DEF_WEIGHTS = {
 def fetch_player_stats():
     """
     Fetches current season player stats: 
-    - Per 100 Possessions for regression features.
-    - Per Game for MPG and basic metadata.
+    - Fetches both Regular Season and Playoff stats.
+    - Joins them and creates a weighted average based on total minutes.
     """
     # Determine current season
     now = datetime.now()
@@ -57,32 +57,74 @@ def fetch_player_stats():
     else:
         season = f"{now.year - 1}-{str(now.year)[2:]}"
     
-    print(f"Fetching player stats for season {season} from nba_api...")
+    print(f"Fetching player stats for season {season} (Regular + Playoffs) from nba_api...")
     
-    # 1. Fetch Per 100 Possessions
     try:
-        p100 = leaguedashplayerstats.LeagueDashPlayerStats(
-            per_mode_detailed='Per100Possessions',
-            season=season
-        )
-        df_100 = p100.get_data_frames()[0]
-        time.sleep(0.6) # Rate limit protection
+        # Helper to fetch a specific type
+        def get_phase_stats(phase):
+            p100 = leaguedashplayerstats.LeagueDashPlayerStats(
+                per_mode_detailed='Per100Possessions',
+                season=season,
+                season_type_all_star=phase
+            ).get_data_frames()[0]
+            
+            time.sleep(0.6) # Rate limit protection
+            
+            pg = leaguedashplayerstats.LeagueDashPlayerStats(
+                per_mode_detailed='PerGame',
+                season=season,
+                season_type_all_star=phase
+            ).get_data_frames()[0]
+            
+            # Combine Per100 and PerGame (for MPG/MIN)
+            df_pg_min = pg[['PLAYER_ID', 'MIN', 'GP']].rename(columns={'MIN': 'MPG', 'GP': 'GP_PHASE'})
+            # Also need total minutes to weight correctly: Total MIN = MPG * GP
+            df_pg_min['TOTAL_MIN_PHASE'] = df_pg_min['MPG'] * df_pg_min['GP_PHASE']
+            
+            return p100.merge(df_pg_min, on='PLAYER_ID', how='inner')
+
+        df_reg = get_phase_stats('Regular Season')
+        df_ply = get_phase_stats('Playoffs')
+
+        if df_reg.empty and df_ply.empty:
+            return pd.DataFrame()
+        if df_reg.empty: return df_ply
+        if df_ply.empty: return df_reg
+
+        # --- Weighted Merge Logic ---
+        # We want to combine them so that if a player is in both, we take the weighted average
+        common_cols = ['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID']
+        stat_cols = [
+            'PTS', 'FGA', 'FTA', 'AST', 'TOV', 'OREB', 'DREB', 'STL', 'BLK', 'PF', 'MPG'
+        ]
         
-        # 2. Fetch Per Game for MPG
-        pg = leaguedashplayerstats.LeagueDashPlayerStats(
-            per_mode_detailed='PerGame',
-            season=season
-        )
-        df_pg = pg.get_data_frames()[0]
+        # Merge the two sets
+        df_combined = df_reg.merge(df_ply, on=common_cols, how='outer', suffixes=('_REG', '_PLY'))
         
-        # Join on PLAYER_ID
-        # We only need MPG (MIN) from the PerGame set
-        df_pg_min = df_pg[['PLAYER_ID', 'MIN']].rename(columns={'MIN': 'MPG'})
-        df = df_100.merge(df_pg_min, on='PLAYER_ID', how='inner')
+        # Fill NaNs with 0 for players only in one phase
+        df_combined = df_combined.fillna(0)
         
-        return df
+        # Calculate weighted averages
+        df_combined['TOTAL_MIN'] = df_combined['TOTAL_MIN_PHASE_REG'] + df_combined['TOTAL_MIN_PHASE_PLY']
+        
+        # Avoid division by zero
+        df_combined = df_combined[df_combined['TOTAL_MIN'] > 0].copy()
+
+        for col in stat_cols:
+            # Weighted average: (Stat_Reg * Min_Reg + Stat_Ply * Min_Ply) / Total_Min
+            reg_val = df_combined[f'{col}_REG' if col != 'MPG' else 'MPG_REG']
+            ply_val = df_combined[f'{col}_PLY' if col != 'MPG' else 'MPG_PLY']
+            
+            df_combined[col] = (
+                (reg_val * df_combined['TOTAL_MIN_PHASE_REG']) + 
+                (ply_val * df_combined['TOTAL_MIN_PHASE_PLY'])
+            ) / df_combined['TOTAL_MIN']
+
+        return df_combined
     except Exception as e:
         print(f"Error fetching player stats: {e}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 def calculate_estimated_raptor(df):
