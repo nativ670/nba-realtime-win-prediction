@@ -1,4 +1,4 @@
-name: Daily Elo Update
+name: Daily NBA Data Update
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # Allows manual triggering
 
 jobs:
-  update-elo:
+  update-nba-data:
     runs-on: ubuntu-latest
     
     steps:
@@ -23,13 +23,16 @@ jobs:
         python -m pip install --upgrade pip
         pip install pandas numpy nba_api requests
 
-    - name: Run Elo Updater
+    - name: Update Team Elo Ratings
       run: python src/data_ingestion/update_elo.py
+
+    - name: Update Player RAPTOR Ratings
+      run: python src/features/raptor_engine.py
 
     - name: Commit and push changes
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add data/processed/live_elo.csv
-        git commit -m "data: auto-update live elo ratings [skip ci]" || echo "No changes to commit"
+        git add data/processed/live_elo.csv data/processed/current_raptor.csv
+        git commit -m "data: auto-update team elo and player raptor ratings [skip ci]" || echo "No changes to commit"
         git push origin main
