@@ -2,8 +2,17 @@ import time
 import requests
 import pandas as pd
 import numpy as np
+import os
+import sys
 from nba_api.stats.endpoints import playbyplayv3
+
+# Add the project root to sys.path so 'src' can be found when running directly
+root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if root_path not in sys.path:
+    sys.path.append(root_path)
+
 from src.features.in_game import calculate_in_game_features
+from src.utils.helpers import standardize_pbp_v3
 
 # ==============================================================================
 # CONFIGURATION
@@ -32,7 +41,8 @@ def fetch_latest_pbp(game_id):
     try:
         pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
         df = pbp.get_data_frames()[0]
-        return df
+        # Standardize for the feature engine
+        return standardize_pbp_v3(df)
     except Exception as e:
         print(f"[!] Error fetching PBP data: {e}")
         return None

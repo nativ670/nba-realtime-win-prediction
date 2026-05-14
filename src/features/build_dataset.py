@@ -1,9 +1,17 @@
 import pandas as pd
 import numpy as np
 import os
+import sys
+
+# Add the project root to sys.path so 'src' can be found when running directly
+root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if root_path not in sys.path:
+    sys.path.append(root_path)
+
 from src.features.in_game import calculate_in_game_features
 from src.features.pregame import calculate_pregame_features, add_external_features
 from src.data_ingestion.fetch_elo import fetch_elo_data
+from src.utils.helpers import standardize_pbp_v3
 
 # ==============================================================================
 # PIPELINE CONFIGURATION
@@ -12,7 +20,6 @@ from src.data_ingestion.fetch_elo import fetch_elo_data
 RAW_PBP_PATH = "data/raw/nba_pbp_10y.parquet"
 RAW_BOX_PATH = "data/raw/nba_box_scores_10y.parquet"
 PROCESSED_DATA_PATH = "data/processed/training_data.parquet"
-
 # ==============================================================================
 # DATASET BUILDER ENGINE
 # ==============================================================================
@@ -31,43 +38,9 @@ def build_training_dataset():
     df_box_raw = pd.read_parquet(RAW_BOX_PATH)
 
     # 1. STANDARDIZE PBP COLUMNS
-    # The raw PBP from nba_api has camelCase; we convert to the expected format for in_game.py
-    df_pbp = df_pbp_raw.rename(columns={
-        'gameId': 'GAME_ID',
-        'period': 'PERIOD',
-        'clock': 'PCTIMESTRING',
-        'scoreHome': 'SCORE_HOME',
-        'scoreAway': 'SCORE_AWAY',
-        'teamId': 'PLAYER1_TEAM_ID',
-        'actionId': 'EVENTNUM' # Approximate mapping for mock logic
-    })
-
-    # Convert PCTIMESTRING from 'PT12M00.00S' to '12:00'
-    def clean_clock(clock_str):
-        if not clock_str or not isinstance(clock_str, str):
-            return "0:00"
-        # Extract minutes and seconds from ISO-8601 like duration
-        # Example: PT11M58.00S -> 11:58
-        parts = clock_str.replace('PT', '').replace('S', '').split('M')
-        mins = parts[0]
-        secs = parts[1].split('.')[0]
-        return f"{mins}:{secs.zfill(2)}"
-
-    df_pbp['PCTIMESTRING'] = df_pbp['PCTIMESTRING'].apply(clean_clock)
+    print("Standardizing PBP columns...")
+    df_pbp = standardize_pbp_v3(df_pbp_raw)
     
-    # Reconstruct 'SCORE' column for in_game.py: "AWAY - HOME" (based on in_game.py logic)
-    df_pbp['SCORE'] = df_pbp['SCORE_AWAY'].astype(str) + " - " + df_pbp['SCORE_HOME'].astype(str)
-    
-    # Map actionType/subType to EVENTMSGTYPE (Heuristic)
-    # 1=Make, 2=Miss, 4=Rebound, 5=Turnover
-    event_map = {
-        'made': 1,
-        'missed': 2,
-        'rebound': 4,
-        'turnover': 5
-    }
-    df_pbp['EVENTMSGTYPE'] = df_pbp['actionType'].map(event_map).fillna(0)
-
     # 2. CALCULATE IN-GAME FEATURES (Vectorized)
     print("Engineering in-game features...")
     # Apply calculate_in_game_features per game

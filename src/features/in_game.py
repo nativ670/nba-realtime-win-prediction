@@ -146,7 +146,7 @@ def calculate_in_game_features(df_pbp):
     
     # Clean up
     cols_to_drop = [
-        'elapsed_time', 'time_lookback', 'temp_idx', 'elapsed_time_hist', 
+        'time_lookback', 'temp_idx', 'elapsed_time_hist', 
         'home_score_hist', 'away_score_hist', 'is_home_to', 'is_away_to',
         'home_to_reg_cumsum', 'away_to_reg_cumsum', 'home_to_ot_cumsum', 'away_to_ot_cumsum',
         'is_h_foul', 'is_a_foul', 'is_h_l2m_foul', 'home_l2m_fouls', 'away_l2m_fouls', 

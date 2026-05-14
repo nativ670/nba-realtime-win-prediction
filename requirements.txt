@@ -11,3 +11,5 @@ uvicorn
 pydantic
 ipykernel
 pyarrow
+streamlit
+plotly

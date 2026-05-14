@@ -1,3 +1,5 @@
+import pandas as pd
+
 # Specific dictionary mapping for all 30 NBA team venue coordinates (lat, lon)
 TEAM_COORDS = {
     "ATL": (33.75, -84.39), "BOS": (42.36, -71.06), "BKN": (40.68, -73.97),
@@ -28,6 +30,70 @@ ELO_TEAM_MAP = {
     "CHA": "CHO",
     "PHX": "PHO"
 }
+
+def standardize_pbp_v3(df_pbp):
+    """
+    Standardizes PlayByPlayV3 data to the legacy V2 format 
+    expected by the feature engineering engine.
+    """
+    if df_pbp is None or df_pbp.empty:
+        return df_pbp
+        
+    # Mapping from PlayByPlayV3 (camelCase) to legacy V2 format
+    rename_map = {
+        'gameId': 'GAME_ID',
+        'period': 'PERIOD',
+        'clock': 'PCTIMESTRING',
+        'scoreHome': 'SCORE_HOME',
+        'scoreAway': 'SCORE_AWAY',
+        'teamId': 'PLAYER1_TEAM_ID',
+        'actionId': 'EVENTNUM',
+        'actionType': 'EVENTMSGTYPE_STR'
+    }
+    df = df_pbp.rename(columns=rename_map)
+
+    # Convert PCTIMESTRING from 'PT12M00.00S' to '12:00'
+    def clean_clock(clock_str):
+        if not clock_str or not isinstance(clock_str, str):
+            return "0:00"
+        if 'PT' in clock_str:
+            # Extract minutes and seconds from ISO-8601 like duration
+            # Example: PT11M58.00S -> 11:58
+            parts = clock_str.replace('PT', '').replace('S', '').split('M')
+            if len(parts) == 2:
+                mins = parts[0].lstrip('0') or '0'
+                secs = parts[1].split('.')[0]
+                return f"{mins}:{secs.zfill(2)}"
+            elif len(parts) == 1: # Only seconds?
+                secs = parts[0].split('.')[0]
+                return f"0:{secs.zfill(2)}"
+        return clock_str
+
+    df['PCTIMESTRING'] = df['PCTIMESTRING'].apply(clean_clock)
+    
+    # Reconstruct 'SCORE' column: "AWAY - HOME"
+    if 'SCORE_HOME' in df.columns and 'SCORE_AWAY' in df.columns:
+        df['SCORE'] = df['SCORE_AWAY'].astype(str) + " - " + df['SCORE_HOME'].astype(str)
+    
+    # Map actionType to EVENTMSGTYPE (Heuristic)
+    # 1=Make, 2=Miss, 4=Rebound, 5=Turnover, 6=Foul, 9=Timeout
+    event_map = {
+        'made': 1,
+        'missed': 2,
+        'rebound': 4,
+        'turnover': 5,
+        'timeout': 9,
+        'foul': 6,
+        'violation': 7,
+        'substitution': 8,
+        'period': 10,
+        'jumpball': 11,
+        'free-throw': 3
+    }
+    if 'EVENTMSGTYPE_STR' in df.columns:
+        df['EVENTMSGTYPE'] = df['EVENTMSGTYPE_STR'].map(event_map).fillna(0)
+    
+    return df
 
 if __name__ == "__main__":
     print("TEAM_COORDS sample (BOS):", TEAM_COORDS["BOS"])
