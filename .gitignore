@@ -156,6 +156,8 @@ data/raw/
 data/processed/*
 !data/processed/live_elo.csv
 !data/processed/current_raptor.csv
+!data/processed/seasons/
+!data/processed/seasons/*.parquet
 data/external/
 !data/README.md
 
