@@ -155,6 +155,7 @@ cython_debug/
 data/raw/
 data/processed/*
 !data/processed/live_elo.csv
+!data/processed/current_raptor.csv
 data/external/
 !data/README.md
 
