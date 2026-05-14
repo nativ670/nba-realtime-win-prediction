@@ -153,7 +153,8 @@ cython_debug/
 
 # Project Specific - Data
 data/raw/
-data/processed/
+data/processed/*
+!data/processed/live_elo.csv
 data/external/
 !data/README.md
 
