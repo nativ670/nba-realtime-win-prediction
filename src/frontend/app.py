@@ -5,6 +5,7 @@ import requests
 import time
 import os
 import sys
+import glob
 
 # --- Path Injection ---
 # Add the project root to sys.path so 'src' can be found
@@ -132,12 +133,18 @@ if "params" not in st.session_state:
 # --- Data Loading ---
 @st.cache_data
 def load_historical_metadata():
-    """Loads pre-game context from processed training data if available."""
-    processed_path = "data/processed/training_data.parquet"
-    if os.path.exists(processed_path):
+    """Loads pre-game context from the most recent partitioned season file."""
+    seasons_dir = "data/processed/seasons"
+    if os.path.exists(seasons_dir):
         try:
+            # Get the most recent season file
+            files = glob.glob(os.path.join(seasons_dir, "*.parquet"))
+            if not files:
+                return None
+            latest_file = max(files, key=os.path.getmtime)
+            
             # Load only necessary columns to save memory
-            df = pd.read_parquet(processed_path, columns=['GAME_ID', 'elo_advantage', 'rest_advantage', 'distance_traveled'])
+            df = pd.read_parquet(latest_file, columns=['GAME_ID', 'elo_advantage', 'rest_advantage', 'distance_traveled'])
             # Keep only one row per game
             return df.drop_duplicates('GAME_ID').set_index('GAME_ID')
         except Exception as e:

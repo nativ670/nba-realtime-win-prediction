@@ -20,7 +20,7 @@ FEATURES = [
 ]
 
 MODEL_PATH = 'src/models/xgb_wp_model.json'
-DATA_PATH = 'data/processed/training_data.parquet'
+SEASONS_DIR = 'data/processed/seasons'
 
 def load_inference_model(model_path):
     """Loads the trained XGBoost model for prediction."""
@@ -39,9 +39,16 @@ def run_live_simulator(game_id, delay=0.1):
     # 1. Load Model
     model = load_inference_model(MODEL_PATH)
     
-    # 2. Load and Filter Data
-    print(f"Loading data and filtering for Game ID: {game_id}...")
-    df = pd.read_parquet(DATA_PATH)
+    # 2. Determine season and load data
+    season_suffix = int(game_id[3:5])
+    season_year = 2000 + season_suffix if season_suffix < 50 else 1900 + season_suffix
+    data_path = os.path.join(SEASONS_DIR, f"pbp_{season_year}.parquet")
+    
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Data for season {season_year} not found at {data_path}")
+
+    print(f"Loading data from {data_path} and filtering for Game ID: {game_id}...")
+    df = pd.read_parquet(data_path)
     game_data = df[df['GAME_ID'] == game_id].copy()
     
     if game_data.empty:

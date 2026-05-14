@@ -29,8 +29,18 @@ FEATURES = BASE_FEATURES + ADVANCED_FEATURES
 TARGET = 'home_win'
 GROUP_COL = 'GAME_ID'
 
+import glob
+
 def load_data(file_path):
-    """Loads the processed training data from a parquet file."""
+    """Loads the processed training data from parquet file(s)."""
+    if os.path.isdir(file_path):
+        print(f"Loading all partitioned data from {file_path}...")
+        files = glob.glob(os.path.join(file_path, "*.parquet"))
+        if not files:
+            raise FileNotFoundError(f"No parquet files found in {file_path}")
+        df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+        return df
+    
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Training data not found at {file_path}")
     
