@@ -69,18 +69,36 @@ def calculate_in_game_features(df_pbp):
     if len(team_ids) >= 2:
         t1, t2 = team_ids[0], team_ids[1]
         other_team_map = {t1: t2, t2: t1}
-        mask_reb = df['EVENTMSGTYPE'] == 4
-        df.loc[mask_reb, 'possession_team_id'] = df.loc[mask_reb, 'PLAYER1_TEAM_ID']
-        mask_flip = df['EVENTMSGTYPE'].isin([1, 5])
-        df.loc[mask_flip, 'possession_team_id'] = df.loc[mask_flip, 'PLAYER1_TEAM_ID'].map(other_team_map)
+        
+        if 'EVENTMSGTYPE_STR' in df.columns:
+            mask_reb = df['EVENTMSGTYPE_STR'] == 'Rebound'
+            df.loc[mask_reb, 'possession_team_id'] = df.loc[mask_reb, 'PLAYER1_TEAM_ID']
+            mask_flip = df['EVENTMSGTYPE_STR'].isin(['Made Shot', 'Turnover'])
+            df.loc[mask_flip, 'possession_team_id'] = df.loc[mask_flip, 'PLAYER1_TEAM_ID'].map(other_team_map)
+        else:
+            mask_reb = df['EVENTMSGTYPE'] == 4
+            df.loc[mask_reb, 'possession_team_id'] = df.loc[mask_reb, 'PLAYER1_TEAM_ID']
+            mask_flip = df['EVENTMSGTYPE'].isin([1, 5])
+            df.loc[mask_flip, 'possession_team_id'] = df.loc[mask_flip, 'PLAYER1_TEAM_ID'].map(other_team_map)
+            
     df['possession_team_id'] = df['possession_team_id'].ffill()
 
     # 5. CLUTCH CONTEXT (Timeouts & Fouls)
     group_cols = ['GAME_ID', 'PERIOD'] if 'GAME_ID' in df.columns else ['PERIOD']
     
     # --- TIMEOUTS ---
-    df['is_home_to'] = ((df['EVENTMSGTYPE'] == 9) & (df['PLAYER1_TEAM_ID'] == home_team_id)).astype(int)
-    df['is_away_to'] = ((df['EVENTMSGTYPE'] == 9) & (df['PLAYER1_TEAM_ID'] == away_team_id)).astype(int)
+    # Use EVENTMSGTYPE_STR if available, otherwise fallback to EVENTMSGTYPE, then description parsing
+    if 'EVENTMSGTYPE_STR' in df.columns:
+        df['is_timeout'] = (df['EVENTMSGTYPE_STR'] == 'Timeout').astype(int)
+    else:
+        df['is_timeout'] = (df['EVENTMSGTYPE'] == 9).astype(int)
+    
+    # Last resort: description parsing for timeouts
+    if df['is_timeout'].sum() == 0 and 'description' in df.columns:
+        df['is_timeout'] = df['description'].str.contains('Timeout', case=False, na=False).astype(int)
+        
+    df['is_home_to'] = ((df['is_timeout'] == 1) & (df['PLAYER1_TEAM_ID'] == home_team_id)).astype(int)
+    df['is_away_to'] = ((df['is_timeout'] == 1) & (df['PLAYER1_TEAM_ID'] == away_team_id)).astype(int)
     
     # Regulation Pool (P1-P4)
     reg_mask = df['PERIOD'] <= 4
@@ -104,8 +122,18 @@ def calculate_in_game_features(df_pbp):
     ).clip(0)
     
     # --- FOULS & BONUS ---
-    df['is_h_foul'] = ((df['EVENTMSGTYPE'] == 6) & (df['PLAYER1_TEAM_ID'] == home_team_id)).astype(int)
-    df['is_a_foul'] = ((df['EVENTMSGTYPE'] == 6) & (df['PLAYER1_TEAM_ID'] == away_team_id)).astype(int)
+    if 'EVENTMSGTYPE_STR' in df.columns:
+        df['is_foul_event'] = (df['EVENTMSGTYPE_STR'] == 'Foul').astype(int)
+    else:
+        df['is_foul_event'] = (df['EVENTMSGTYPE'] == 6).astype(int)
+        
+    # Last resort: description parsing for fouls
+    if df['is_foul_event'].sum() == 0 and 'description' in df.columns:
+        # Matches "P.FOUL", "S.FOUL", "T.FOUL", "L.B.FOUL", etc.
+        df['is_foul_event'] = df['description'].str.contains(r'\.FOUL', case=False, na=False).astype(int)
+
+    df['is_h_foul'] = ((df['is_foul_event'] == 1) & (df['PLAYER1_TEAM_ID'] == home_team_id)).astype(int)
+    df['is_a_foul'] = ((df['is_foul_event'] == 1) & (df['PLAYER1_TEAM_ID'] == away_team_id)).astype(int)
     
     df['home_team_fouls'] = df.groupby(group_cols)['is_h_foul'].cumsum()
     df['away_team_fouls'] = df.groupby(group_cols)['is_a_foul'].cumsum()

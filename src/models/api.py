@@ -76,8 +76,8 @@ app = FastAPI(title="NBA Real-Time Win Probability API - The Blender")
 def load_models():
     """Loads both XGBoost and LSTM models on application startup."""
     global xgb_model, lstm_model
-    xgb_path = os.path.join("src", "models", "xgb_wp_model.json")
-    lstm_path = os.path.join("src", "models", "lstm_wp_model.keras")
+    xgb_path = os.path.join("src", "models", "xgb_v2_10man.json")
+    lstm_path = os.path.join("src", "models", "lstm_v2_10man.keras")
     
     # Load XGBoost
     if not os.path.exists(xgb_path):

@@ -65,7 +65,7 @@ def train_lstm_model():
     model.summary()
     
     # 6. Callbacks
-    save_path = 'src/models/lstm_wp_model.keras'
+    save_path = 'src/models/lstm_v2_10man.keras'
     checkpoint = ModelCheckpoint(
         save_path, 
         monitor='val_loss', 

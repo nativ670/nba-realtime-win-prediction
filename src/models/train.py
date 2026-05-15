@@ -114,7 +114,7 @@ def plot_and_save_importance(model, output_path='nba_feature_importance.png'):
     plt.savefig(output_path)
     plt.close()
 
-def save_model(model, output_path='src/models/xgb_wp_model.json'):
+def save_model(model, output_path='src/models/xgb_v2_10man.json'):
     """Saves the trained model to a JSON file."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     print(f"Saving model to {output_path}...")
