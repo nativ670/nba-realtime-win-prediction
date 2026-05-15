@@ -157,7 +157,9 @@ data/processed/*
 !data/processed/live_elo.csv
 !data/processed/current_raptor.csv
 !data/processed/seasons/
-!data/processed/seasons/*.parquet
+data/processed/seasons/*
+!data/processed/seasons/pbp_2025.parquet
+!data/processed/seasons/pbp_2026.parquet
 data/external/
 !data/README.md
 
@@ -170,5 +172,14 @@ data/external/
 # Logs
 *.log
 
-# Ignore Large NumPy Binaries
+# Ignore Large Binary Formats
 *.npy
+*.parquet
+*.csv
+*.zip
+
+# Operational Exceptions for GitHub Actions
+!data/processed/live_elo.csv
+!data/processed/current_raptor.csv
+!data/processed/seasons/pbp_2025.parquet
+!data/processed/seasons/pbp_2026.parquet

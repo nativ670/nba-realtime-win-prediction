@@ -19,7 +19,8 @@ def test_ensemble_api():
                 "home_timeouts_remaining": 7,
                 "away_timeouts_remaining": 7,
                 "home_in_bonus": 0,
-                "away_in_bonus": 0
+                "away_in_bonus": 0,
+                "live_raptor_advantage": 1.5
             },
             {
                 "score_differential": 4,
@@ -32,7 +33,8 @@ def test_ensemble_api():
                 "home_timeouts_remaining": 7,
                 "away_timeouts_remaining": 7,
                 "home_in_bonus": 0,
-                "away_in_bonus": 0
+                "away_in_bonus": 0,
+                "live_raptor_advantage": 1.8
             }
         ]
     }

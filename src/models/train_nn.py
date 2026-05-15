@@ -40,7 +40,7 @@ def train_lstm_model():
     
     # 4. Build Model Architecture
     model = Sequential([
-        # Input shape: (timesteps, features) -> (15, 11)
+        # Input shape: (timesteps, features) -> (15, 12)
         InputLayer(shape=(X.shape[1], X.shape[2])),
         
         # First LSTM Layer

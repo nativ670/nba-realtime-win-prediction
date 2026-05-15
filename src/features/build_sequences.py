@@ -23,7 +23,8 @@ FEATURES = [
     'home_timeouts_remaining', 
     'away_timeouts_remaining', 
     'home_in_bonus', 
-    'away_in_bonus'
+    'away_in_bonus',
+    'live_raptor_advantage'
 ]
 TARGET = 'home_win'
 

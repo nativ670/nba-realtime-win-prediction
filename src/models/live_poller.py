@@ -13,6 +13,7 @@ if root_path not in sys.path:
     sys.path.append(root_path)
 
 from src.features.in_game import calculate_in_game_features
+from src.features.substitution_tracker import SubstitutionTracker
 from src.utils.helpers import standardize_pbp_v3
 
 # ==============================================================================
@@ -75,6 +76,9 @@ def run_poller(game_id):
 
     # Initialize rolling sequence for LSTM (maxlen=15)
     rolling_sequence = deque(maxlen=15)
+    
+    # Initialize Substitution Tracker
+    sub_tracker = SubstitutionTracker(game_id)
 
     while True:
         try:
@@ -84,6 +88,9 @@ def run_poller(game_id):
             if df_pbp is not None and not df_pbp.empty:
                 # 2. Process features using the engine from src/features/in_game.py
                 processed_df = calculate_in_game_features(df_pbp)
+                
+                # 3. Add Live RAPTOR Advantage
+                processed_df = sub_tracker.process_pbp(processed_df)
                 
                 # Get the absolute latest state
                 latest_state = processed_df.iloc[-1]
@@ -100,16 +107,17 @@ def run_poller(game_id):
                     "home_timeouts_remaining": int(latest_state['home_timeouts_remaining']),
                     "away_timeouts_remaining": int(latest_state['away_timeouts_remaining']),
                     "home_in_bonus": int(latest_state['home_in_bonus']),
-                    "away_in_bonus": int(latest_state['away_in_bonus'])
+                    "away_in_bonus": int(latest_state['away_in_bonus']),
+                    "live_raptor_advantage": float(latest_state['live_raptor_advantage'])
                 }
                 
                 # Append to rolling sequence
                 rolling_sequence.append(current_features)
                 
-                # 3. Construct the Ensemble Payload
+                # 4. Construct the Ensemble Payload
                 payload = {"sequence": list(rolling_sequence)}
                 
-                # 4. Request Win Probability from our FastAPI server
+                # 5. Request Win Probability from our FastAPI server
                 response = requests.post(API_URL, json=payload)
                 
                 if response.status_code == 200:

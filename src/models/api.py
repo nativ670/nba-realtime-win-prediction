@@ -21,7 +21,8 @@ FEATURES = [
     'home_timeouts_remaining', 
     'away_timeouts_remaining', 
     'home_in_bonus', 
-    'away_in_bonus'
+    'away_in_bonus',
+    'live_raptor_advantage'
 ]
 
 # Pydantic model for individual game state
@@ -37,6 +38,7 @@ class GameFeatureList(BaseModel):
     away_timeouts_remaining: int = Field(..., description="Away team timeouts left")
     home_in_bonus: int = Field(..., description="1 if home team is in bonus, 0 otherwise")
     away_in_bonus: int = Field(..., description="1 if away team is in bonus, 0 otherwise")
+    live_raptor_advantage: float = Field(..., description="Real-time RAPTOR advantage on the floor")
 
 # Pydantic model for ensemble input
 class EnsemblePayload(BaseModel):
@@ -57,7 +59,8 @@ class EnsemblePayload(BaseModel):
                         "home_timeouts_remaining": 3,
                         "away_timeouts_remaining": 2,
                         "home_in_bonus": 0,
-                        "away_in_bonus": 1
+                        "away_in_bonus": 1,
+                        "live_raptor_advantage": 2.5
                     }
                 ]
             }
@@ -121,7 +124,7 @@ async def predict_win_prob(payload: EnsemblePayload):
         xgb_prob = float(xgb_probs[0][1])
         
         # --- 3. LSTM PREDICTION ---
-        # LSTM expects a 3D array of shape (1, 15, 11)
+        # LSTM expects a 3D array of shape (1, 15, feature_count)
         # Convert sequence to numpy array
         seq_array = df_seq.values
         
@@ -135,8 +138,8 @@ async def predict_win_prob(payload: EnsemblePayload):
             # Should not happen due to Pydantic max_items=15, but for safety:
             seq_array = seq_array[-15:]
             
-        # Reshape for LSTM: (1, 15, 11)
-        lstm_input = seq_array.reshape(1, 15, 11)
+        # Reshape for LSTM: (1, 15, feature_count)
+        lstm_input = seq_array.reshape(1, 15, len(FEATURES))
         lstm_probs = lstm_model.predict(lstm_input, verbose=0)
         lstm_prob = float(lstm_probs[0][0])
         

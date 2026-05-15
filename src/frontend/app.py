@@ -13,6 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from nba_api.stats.endpoints import playbyplayv3, boxscoresummaryv3
 from src.features.in_game import calculate_in_game_features
+from src.features.substitution_tracker import SubstitutionTracker
 from src.utils.helpers import standardize_pbp_v3
 
 # --- Configuration ---
@@ -209,6 +210,11 @@ def fetch_game_metadata(game_id):
 def fetch_and_process(game_id):
     """Fetches PBP data and runs it through the feature engineering engine."""
     try:
+        # Initialize Substitution Tracker if not present or game changed
+        if "sub_tracker" not in st.session_state or st.session_state.get("tracker_game_id") != game_id:
+            st.session_state.sub_tracker = SubstitutionTracker(game_id)
+            st.session_state.tracker_game_id = game_id
+
         if st.session_state.is_polling:
              pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
         else:
@@ -221,6 +227,10 @@ def fetch_and_process(game_id):
         
         df_pbp = standardize_pbp_v3(df_pbp_raw)
         df_features = calculate_in_game_features(df_pbp)
+        
+        # Add Live RAPTOR Advantage
+        df_features = st.session_state.sub_tracker.process_pbp(df_features)
+        
         return df_features
     except Exception as e:
         st.error(f"Error fetching data: {e}")
@@ -269,7 +279,8 @@ def get_predictions(df_features, elo_adv, rest_adv, dist_trav):
                     "home_timeouts_remaining": int(s_row['home_timeouts_remaining']),
                     "away_timeouts_remaining": int(s_row['away_timeouts_remaining']),
                     "home_in_bonus": int(s_row['home_in_bonus']),
-                    "away_in_bonus": int(s_row['away_in_bonus'])
+                    "away_in_bonus": int(s_row['away_in_bonus']),
+                    "live_raptor_advantage": float(s_row.get('live_raptor_advantage', 0.0))
                 })
             
             payload = {"sequence": payload_sequence}
