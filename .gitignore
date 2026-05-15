@@ -169,3 +169,6 @@ data/external/
 
 # Logs
 *.log
+
+# Ignore Large NumPy Binaries
+*.npy
