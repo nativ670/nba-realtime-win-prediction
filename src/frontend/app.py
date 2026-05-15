@@ -11,7 +11,7 @@ import glob
 # Add the project root to sys.path so 'src' can be found
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from nba_api.stats.endpoints import playbyplayv3, boxscoresummaryv2
+from nba_api.stats.endpoints import playbyplayv3, boxscoresummaryv3
 from src.features.in_game import calculate_in_game_features
 from src.utils.helpers import standardize_pbp_v3
 
@@ -45,7 +45,7 @@ st.markdown("""
         display: flex;
         justify-content: space-around;
         text-align: center;
-        margin-bottom: 30px;
+        margin-bottom: 20px;
         gap: 20px;
     }
     .live-metric-box {
@@ -57,20 +57,39 @@ st.markdown("""
         flex: 1;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
     }
+    .sub-metric-container {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    .sub-metric-box {
+        background-color: #f3f4f6;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #d1d5db;
+        min-width: 180px;
+        text-align: center;
+    }
     .live-metric-label {
-        font-size: 1.3rem;
+        font-size: 1.1rem;
         color: #6b7280;
         text-transform: uppercase;
         letter-spacing: 0.1em;
-        margin-bottom: 10px;
+        margin-bottom: 5px;
     }
     .live-metric-value {
-        font-size: 3.8rem;
+        font-size: 3.2rem;
         font-weight: 800;
         color: #111827;
     }
+    .sub-metric-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #374151;
+    }
     .live-metric-delta {
-        font-size: 1.6rem;
+        font-size: 1.4rem;
         font-weight: 600;
         margin-top: 5px;
     }
@@ -90,15 +109,6 @@ st.markdown("""
         border: 1px solid #dee2e6;
         margin-bottom: 20px;
         text-align: center;
-    }
-    .game-header h2 {
-        margin: 0;
-        color: #1f2937;
-    }
-    .game-header p {
-        margin: 5px 0 0 0;
-        color: #6b7280;
-        font-size: 1rem;
     }
     @keyframes blinker {
         50% { opacity: 0; }
@@ -122,31 +132,35 @@ if "is_polling" not in st.session_state:
     st.session_state.is_polling = False
 if "trigger_fetch" not in st.session_state:
     st.session_state.trigger_fetch = False
-if "params" not in st.session_state:
-    st.session_state.params = {
-        'elo_adv': 50.0,
-        'rest_adv': 0,
-        'dist_trav': 300.0,
-        'poll_interval': 15
-    }
+
+# Initialize parameters directly in session state for widget binding
+if 'elo_adv' not in st.session_state:
+    st.session_state.elo_adv = 50.0
+if 'rest_adv' not in st.session_state:
+    st.session_state.rest_adv = 0
+if 'dist_trav' not in st.session_state:
+    st.session_state.dist_trav = 300.0
+if 'poll_interval' not in st.session_state:
+    st.session_state.poll_interval = 15
 
 # --- Data Loading ---
 @st.cache_data
 def load_historical_metadata():
-    """Loads pre-game context from the most recent partitioned season file."""
+    """Loads pre-game context from all partitioned season files."""
     seasons_dir = "data/processed/seasons"
     if os.path.exists(seasons_dir):
         try:
-            # Get the most recent season file
             files = glob.glob(os.path.join(seasons_dir, "*.parquet"))
             if not files:
                 return None
-            latest_file = max(files, key=os.path.getmtime)
-            
-            # Load only necessary columns to save memory
-            df = pd.read_parquet(latest_file, columns=['GAME_ID', 'elo_advantage', 'rest_advantage', 'distance_traveled'])
-            # Keep only one row per game
-            return df.drop_duplicates('GAME_ID').set_index('GAME_ID')
+            dfs = []
+            for f in files:
+                # Load only required columns to save memory
+                df = pd.read_parquet(f, columns=['GAME_ID', 'elo_advantage', 'rest_advantage', 'distance_traveled'])
+                dfs.append(df.drop_duplicates('GAME_ID'))
+            if dfs:
+                combined = pd.concat(dfs, ignore_index=True)
+                return combined.drop_duplicates('GAME_ID').set_index('GAME_ID')
         except Exception as e:
             st.warning(f"Could not load historical metadata: {e}")
     return None
@@ -156,32 +170,29 @@ historical_meta = load_historical_metadata()
 # --- Core Functions ---
 
 def fetch_game_metadata(game_id):
-    """Fetches game metadata like team names, date, and time."""
+    """Fetches game metadata like team names, date, and time using BoxScoreSummaryV3."""
     try:
-        summary = boxscoresummaryv2.BoxScoreSummaryV2(game_id=game_id)
-        df_summary = summary.get_data_frames()[0] # GameSummary
-        df_linescore = summary.get_data_frames()[5] # LineScore
+        summary = boxscoresummaryv3.BoxScoreSummaryV3(game_id=game_id)
+        df_summary = summary.get_data_frames()[1] # BoxScoreSummary (contains gameDate)
+        df_linescore = summary.get_data_frames()[4] # TeamStats/LineScore
 
         if df_summary.empty or df_linescore.empty:
             return {}
 
-        game_date_raw = df_summary.iloc[0]['GAME_DATE_EST']
-        # Convert date to a nicer format if possible
+        game_date_raw = df_summary.iloc[0]['gameDate']
         try:
             game_date = pd.to_datetime(game_date_raw).strftime("%B %d, %Y")
         except:
             game_date = game_date_raw
 
-        # Get Team Names
         def get_full_name(row):
-            if 'TEAM_NAME' in row and pd.notna(row['TEAM_NAME']):
-                return row['TEAM_NAME']
-            city = row.get('TEAM_CITY_NAME', '')
-            nickname = row.get('TEAM_NICKNAME', '')
+            city = row.get('teamCity', '')
+            nickname = row.get('teamName', '')
             if city and nickname:
                 return f"{city} {nickname}"
-            return row.get('TEAM_ABBREVIATION', 'Unknown')
+            return row.get('teamTricode', 'Unknown')
 
+        # In BoxScoreSummaryV3 LineScore: 0 is usually Away, 1 is Home
         home_team = get_full_name(df_linescore.iloc[1]) if len(df_linescore) > 1 else "Home Team"
         away_team = get_full_name(df_linescore.iloc[0]) if len(df_linescore) > 1 else "Away Team"
         
@@ -198,7 +209,6 @@ def fetch_game_metadata(game_id):
 def fetch_and_process(game_id):
     """Fetches PBP data and runs it through the feature engineering engine."""
     try:
-        # Reduced noise for live polling
         if st.session_state.is_polling:
              pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
         else:
@@ -206,15 +216,10 @@ def fetch_and_process(game_id):
                 pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
         
         df_pbp_raw = pbp.get_data_frames()[0]
-        
         if df_pbp_raw.empty:
-            st.warning(f"No play-by-play data found for Game ID {game_id}.")
             return None
         
-        # Standardize columns for the engine
         df_pbp = standardize_pbp_v3(df_pbp_raw)
-        
-        # Process features using our shared engine
         df_features = calculate_in_game_features(df_pbp)
         return df_features
     except Exception as e:
@@ -222,11 +227,9 @@ def fetch_and_process(game_id):
         return None
 
 def get_predictions(df_features, elo_adv, rest_adv, dist_trav):
-    """Sends feature rows to the FastAPI server to get Win Probabilities."""
+    """Sends feature sequences to the FastAPI server to get Win Probabilities."""
     
     existing_history = st.session_state.history
-    
-    # Identify only new plays based on EVENTNUM to avoid redundant API calls
     if not existing_history.empty:
         new_plays = df_features[~df_features['EVENTNUM'].isin(existing_history['EVENTNUM'])].copy()
     else:
@@ -235,7 +238,6 @@ def get_predictions(df_features, elo_adv, rest_adv, dist_trav):
     if new_plays.empty and not existing_history.empty:
         return existing_history
     
-    # Progress bar only for historical re-calculation
     progress_bar = st.empty()
     if not st.session_state.is_polling and len(new_plays) > 20:
         progress_bar = st.progress(0)
@@ -243,35 +245,49 @@ def get_predictions(df_features, elo_adv, rest_adv, dist_trav):
     total_new = len(new_plays)
     new_results = []
     
-    # We'll use a session to speed up requests
+    # Track the rolling window of features for the LSTM
+    all_features_list = df_features.to_dict('records')
+    
     with requests.Session() as session:
         for i, (idx, row) in enumerate(new_plays.iterrows()):
-            payload = {
-                "score_differential": int(row['score_differential']),
-                "seconds_remaining_in_game": float(row['seconds_remaining_in_game']),
-                "possession_team_id": int(row['possession_team_id']) if pd.notna(row['possession_team_id']) else 0,
-                "elo_advantage": float(elo_adv),
-                "rest_advantage": int(rest_adv),
-                "distance_traveled": float(dist_trav),
-                "momentum_differential": float(row['momentum_differential']),
-                "home_timeouts_remaining": int(row['home_timeouts_remaining']),
-                "away_timeouts_remaining": int(row['away_timeouts_remaining']),
-                "home_in_bonus": int(row['home_in_bonus']),
-                "away_in_bonus": int(row['away_in_bonus'])
-            }
+            # Find the index in the full feature list to build the sequence
+            current_idx = df_features.index.get_loc(idx)
+            start_idx = max(0, current_idx - 14)
+            sequence_slice = all_features_list[start_idx : current_idx + 1]
+            
+            # Construct Sequence Payload
+            payload_sequence = []
+            for s_row in sequence_slice:
+                payload_sequence.append({
+                    "score_differential": int(s_row['score_differential']),
+                    "seconds_remaining_in_game": float(s_row['seconds_remaining_in_game']),
+                    "possession_team_id": int(s_row['possession_team_id']) if pd.notna(s_row['possession_team_id']) else 0,
+                    "elo_advantage": float(elo_adv),
+                    "rest_advantage": int(rest_adv),
+                    "distance_traveled": float(dist_trav),
+                    "momentum_differential": float(s_row['momentum_differential']),
+                    "home_timeouts_remaining": int(s_row['home_timeouts_remaining']),
+                    "away_timeouts_remaining": int(s_row['away_timeouts_remaining']),
+                    "home_in_bonus": int(s_row['home_in_bonus']),
+                    "away_in_bonus": int(s_row['away_in_bonus'])
+                })
+            
+            payload = {"sequence": payload_sequence}
             
             try:
                 response = session.post(API_URL, json=payload, timeout=5)
                 if response.status_code == 200:
-                    wp = response.json()["home_win_probability"]
+                    data = response.json()
                     row_data = row.to_dict()
-                    row_data['home_win_probability'] = wp
+                    row_data['home_win_probability'] = data["final_win_probability"]
+                    row_data['xgb_prob'] = data["xgb_prob"]
+                    row_data['lstm_prob'] = data["lstm_prob"]
                     new_results.append(row_data)
                 else:
-                    st.error(f"API Error at EVENT {row['EVENTNUM']}: {response.text}")
+                    st.error(f"API Error: {response.text}")
                     break
-            except requests.exceptions.ConnectionError:
-                st.error("Connection Error: Is the FastAPI server running at http://127.0.0.1:8000?")
+            except Exception as e:
+                st.error(f"Connection Error: {e}")
                 return existing_history
             
             if not st.session_state.is_polling and total_new > 20:
@@ -287,291 +303,203 @@ def get_predictions(df_features, elo_adv, rest_adv, dist_trav):
     return existing_history
 
 def render_scoreboard(latest, is_live=False):
-    """Renders a high-visibility scoreboard."""
+    """Renders the updated high-visibility ensemble scoreboard."""
     score_diff = int(latest['score_differential'])
     diff_color = "#10b981" if score_diff >= 0 else "#ef4444"
     diff_sign = "+" if score_diff > 0 else ""
     
-    wp_pct = latest['home_win_probability'] * 100
-    wp_color = "#3b82f6" # Neutral blue for WP
+    final_wp = latest['home_win_probability'] * 100
+    xgb_wp = latest.get('xgb_prob', 0) * 100
+    lstm_wp = latest.get('lstm_prob', 0) * 100
+
+    # Main Row
+    st.markdown(f"""
+        <div class="live-metric-container">
+            <div class="live-metric-box" style="border-color: {diff_color}">
+                <div class="live-metric-label">Score Differential</div>
+                <div class="live-metric-value" style="color: {diff_color}">{diff_sign}{score_diff}</div>
+                <div class="live-metric-delta">{int(latest['home_score'])} - {int(latest['away_score'])}</div>
+            </div>
+            <div class="live-metric-box">
+                <div class="live-metric-label">Final Win Probability</div>
+                <div class="live-metric-value">{final_wp:.1f}%</div>
+                <div class="live-metric-delta">{latest['PCTIMESTRING']} Period {int(latest['PERIOD'])}</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Sub Row (The Debate)
+    st.markdown(f"""
+        <div class="sub-metric-container">
+            <div class="sub-metric-box">
+                <div class="live-metric-label">XGBoost (Math)</div>
+                <div class="sub-metric-value">{xgb_wp:.0f}%</div>
+            </div>
+            <div class="sub-metric-box">
+                <div class="live-metric-label">LSTM (Momentum)</div>
+                <div class="sub-metric-value">{lstm_wp:.0f}%</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
     if is_live:
-        # High-Visibility "Live" Dashboard
-        st.markdown(f"""
-            <div class="live-metric-container">
-                <div class="live-metric-box">
-                    <div class="live-metric-label">Score</div>
-                    <div class="live-metric-value">{int(latest['home_score'])} - {int(latest['away_score'])}</div>
-                    <div class="live-metric-delta" style="color: {diff_color}">{diff_sign}{score_diff}</div>
-                </div>
-                <div class="live-metric-box">
-                    <div class="live-metric-label">Time / Period</div>
-                    <div class="live-metric-value">{latest['PCTIMESTRING']}</div>
-                    <div class="live-metric-delta">Period {int(latest['PERIOD'])}</div>
-                </div>
-                <div class="live-metric-box">
-                    <div class="live-metric-label">Win Probability</div>
-                    <div class="live-metric-value" style="color: {wp_color}">{wp_pct:.1f}%</div>
-                    <div class="live-metric-delta">Home Team</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
         st.markdown('<p class="live-status">● LIVE POLLING ACTIVE</p>', unsafe_allow_html=True)
-    else:
-        # Standard Metrics for historical analysis
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Score", f"{int(latest['home_score'])} - {int(latest['away_score'])}", f"{score_diff}")
-        col2.metric("Clock", f"{latest['PCTIMESTRING']}", f"Period {int(latest['PERIOD'])}")
-        col3.metric("Home Win Prob", f"{wp_pct:.1f}%")
 
 # --- Sidebar Inputs ---
-if not st.session_state.is_polling:
-    st.sidebar.header("⚙️ Game Settings")
-    game_id = st.sidebar.text_input("Enter GAME_ID (e.g., 0022300001)", st.session_state.current_game_id or "0022300001")
-
-    # Handle GAME_ID Change
-    if game_id != st.session_state.current_game_id:
+def on_game_id_change():
+    new_id = st.session_state.game_id_input
+    if new_id != st.session_state.current_game_id:
+        st.session_state.current_game_id = new_id
         st.session_state.history = pd.DataFrame()
-        st.session_state.current_game_id = game_id
-        st.session_state.game_meta = {} # Clear old meta
+        st.session_state.game_meta = {}
         st.session_state.is_polling = False
 
-        # Automatic Context Lookup on GAME_ID change
-        if historical_meta is not None and game_id in historical_meta.index:
-            meta = historical_meta.loc[game_id]
-            st.session_state.params['elo_adv'] = float(meta['elo_advantage'] * 100)
-            st.session_state.params['rest_adv'] = int(meta['rest_advantage'])
-            st.session_state.params['dist_trav'] = float(meta['distance_traveled'])
-            st.sidebar.success(f"✅ Found historical context for {game_id}")
+        # Automatic Context Lookup
+        if historical_meta is not None and new_id in historical_meta.index:
+            meta = historical_meta.loc[new_id]
+            st.session_state.elo_adv = float(meta['elo_advantage'] * 100)
+            st.session_state.rest_adv = int(meta['rest_advantage'])
+            st.session_state.dist_trav = float(meta['distance_traveled'])
+
+if not st.session_state.is_polling:
+    st.sidebar.header("⚙️ Game Settings")
+    
+    if "game_id_input" not in st.session_state:
+        st.session_state.game_id_input = st.session_state.current_game_id or "0022300001"
+
+    st.sidebar.text_input("Enter GAME_ID", key="game_id_input", on_change=on_game_id_change)
+    
+    # Initialize current_game_id if it's empty
+    if not st.session_state.current_game_id:
+        st.session_state.current_game_id = st.session_state.game_id_input
 
     st.sidebar.subheader("📋 Pre-Game Context")
-    st.session_state.params['elo_adv'] = st.sidebar.number_input(
-        "Elo Advantage (Home - Away)", 
-        value=st.session_state.params['elo_adv'], 
-        help="Difference in Elo ratings between home and away team."
-    )
-    st.session_state.params['rest_adv'] = st.sidebar.number_input(
-        "Rest Advantage (Days)", 
-        value=st.session_state.params['rest_adv'], 
-        help="Days of rest difference."
-    )
-    st.session_state.params['dist_trav'] = st.sidebar.number_input(
-        "Away Distance Traveled (Miles)", 
-        value=st.session_state.params['dist_trav'], 
-        help="Distance the away team traveled to the venue."
-    )
+    st.sidebar.number_input("Elo Advantage", key="elo_adv")
+    st.sidebar.number_input("Rest Advantage", key="rest_adv")
+    st.sidebar.number_input("Distance Traveled", key="dist_trav")
 
     st.sidebar.markdown("---")
-    st.session_state.params['poll_interval'] = st.sidebar.slider(
-        "Poll Interval (seconds)", 5, 60, st.session_state.params['poll_interval']
-    )
+    st.sidebar.slider("Poll Interval (s)", 5, 60, key="poll_interval")
 
-    # Action Buttons
     col_btn1, col_btn2 = st.sidebar.columns(2)
     if col_btn1.button("📊 Analyze History"):
         st.session_state.is_polling = False
-        st.session_state.history = pd.DataFrame() # Clear to force full re-fetch
-        st.session_state.game_meta = fetch_game_metadata(game_id)
+        st.session_state.history = pd.DataFrame()
+        st.session_state.game_meta = fetch_game_metadata(st.session_state.current_game_id)
         st.session_state.trigger_fetch = True
-
     if col_btn2.button("📡 Start Live"):
         st.session_state.is_polling = True
-        st.session_state.history = pd.DataFrame() # Start fresh for live
-        st.session_state.game_meta = fetch_game_metadata(game_id)
+        st.session_state.history = pd.DataFrame()
+        st.session_state.game_meta = fetch_game_metadata(st.session_state.current_game_id)
         st.rerun()
 else:
-    # Minimalist Sidebar for Live Mode
     st.sidebar.header("📡 Live Mode Active")
     st.sidebar.write(f"**Game ID:** {st.session_state.current_game_id}")
-    if st.session_state.game_meta:
-        st.sidebar.write(f"**Matchup:** {st.session_state.game_meta.get('matchup')}")
-        st.sidebar.write(f"**Date:** {st.session_state.game_meta.get('game_date')}")
-    st.sidebar.write(f"**Polling Interval:** {st.session_state.params['poll_interval']}s")
-    
     if st.sidebar.button("🛑 Stop Polling"):
         st.session_state.is_polling = False
         st.rerun()
 
-    st.sidebar.markdown("---")
-    st.sidebar.info("Settings are hidden during Live Mode for a cleaner view. Stop polling to change settings.")
-
-# Use params from session state
-current_elo = st.session_state.params['elo_adv']
-current_rest = st.session_state.params['rest_adv']
-current_dist = st.session_state.params['dist_trav']
-poll_interval = st.session_state.params['poll_interval']
-game_id = st.session_state.current_game_id
-
-# --- Display Game Header ---
+# --- Main Dashboard Logic ---
 if st.session_state.game_meta:
     meta = st.session_state.game_meta
-    st.markdown(f"""
-        <div class="game-header">
-            <h2>{meta.get('matchup')}</h2>
-            <p>{meta.get('game_date')}</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f'<div class="game-header"><h2>{meta.get("matchup")}</h2><p>{meta.get("game_date")}</p></div>', unsafe_allow_html=True)
 
-# --- Main Dashboard Logic ---
-
-# 1. Trigger Data Fetching & Prediction
-df_features = None
-history = None
 if st.session_state.is_polling or st.session_state.trigger_fetch or (not st.session_state.history.empty):
-    df_features = fetch_and_process(game_id if not st.session_state.is_polling else st.session_state.current_game_id)
+    df_features = fetch_and_process(st.session_state.current_game_id)
     if df_features is not None:
-        # Use current parameters (from session state if polling)
-        history = get_predictions(df_features, current_elo, current_rest, current_dist)
+        # Use session state keys
+        history = get_predictions(
+            df_features, 
+            st.session_state.elo_adv, 
+            st.session_state.rest_adv, 
+            st.session_state.dist_trav
+        )
         st.session_state.trigger_fetch = False
         
         if not history.empty:
             latest = history.iloc[-1]
-            
-            # Use specialized scoreboard renderer
             render_scoreboard(latest, is_live=st.session_state.is_polling)
 
-            # --- Chart ---
+            # --- Plotly Chart ---
             st.subheader("📈 Win Probability Trend")
-            
-            # Clean data for plotting: remove NaNs and ensure numeric
-            chart_data = history.copy()
-            chart_data = chart_data.dropna(subset=['elapsed_time', 'home_win_probability'])
+            chart_data = history.dropna(subset=['elapsed_time', 'home_win_probability'])
             
             if not chart_data.empty:
-                # Use elapsed_time from the feature engine
                 x_vals = pd.to_numeric(chart_data['elapsed_time']).tolist()
                 y_vals = pd.to_numeric(chart_data['home_win_probability']).tolist()
                 
                 # Prepare hover data
                 chart_data['game_result'] = chart_data['home_score'].fillna(0).astype(int).astype(str) + " - " + chart_data['away_score'].fillna(0).astype(int).astype(str)
                 chart_data['time_classic'] = chart_data['PCTIMESTRING'].fillna("") + " Q" + chart_data['PERIOD'].fillna(0).astype(int).astype(str)
-                # Fix for Overtime labeling
+                # Overtime labeling
                 chart_data.loc[chart_data['PERIOD'] > 4, 'time_classic'] = \
                     chart_data['PCTIMESTRING'].fillna("") + " OT" + (chart_data['PERIOD'] - 4).fillna(0).astype(int).astype(str)
 
-                # Split into above and below 50% for color switching
+                # Split color logic
                 x_above, y_above = [], []
                 x_below, y_below = [], []
                 
                 for i in range(len(y_vals)):
                     if y_vals[i] >= 0.5:
                         if i > 0 and y_vals[i-1] < 0.5:
-                            # Intersect at 0.5
+                            # Intersect
                             t = x_vals[i-1] + (0.5 - y_vals[i-1]) * (x_vals[i] - x_vals[i-1]) / (y_vals[i] - y_vals[i-1])
                             x_above.append(t); y_above.append(0.5)
-                            x_below.append(t); y_below.append(0.5)
-                            # Break red line
-                            x_below.append(None); y_below.append(None)
-                        
-                        x_above.append(x_vals[i])
-                        y_above.append(y_vals[i])
+                            x_below.append(t); y_below.append(0.5); x_below.append(None); y_below.append(None)
+                        x_above.append(x_vals[i]); y_above.append(y_vals[i])
                     else:
                         if i > 0 and y_vals[i-1] >= 0.5:
-                            # Intersect at 0.5
+                            # Intersect
                             t = x_vals[i-1] + (0.5 - y_vals[i-1]) * (x_vals[i] - x_vals[i-1]) / (y_vals[i] - y_vals[i-1])
-                            x_above.append(t); y_above.append(0.5)
+                            x_above.append(t); y_above.append(0.5); x_above.append(None); y_above.append(None)
                             x_below.append(t); y_below.append(0.5)
-                            # Break blue line
-                            x_above.append(None); y_above.append(None)
-                        
-                        x_below.append(x_vals[i])
-                        y_below.append(y_vals[i])
+                        x_below.append(x_vals[i]); y_below.append(y_vals[i])
 
                 fig = go.Figure()
-
-                # Background Regions
                 fig.add_hrect(y0=0.5, y1=1.0, fillcolor="#3b82f6", opacity=0.05, line_width=0, layer="below")
                 fig.add_hrect(y0=0.0, y1=0.5, fillcolor="#ef4444", opacity=0.05, line_width=0, layer="below")
-
-                # 50% Baseline
                 fig.add_hline(y=0.5, line_dash="solid", line_color="rgba(0,0,0,0.1)", line_width=1)
 
                 # Quarter/OT Lines
-                max_period = int(chart_data['PERIOD'].max()) if not chart_data['PERIOD'].empty else 4
+                max_period = int(chart_data['PERIOD'].max())
                 for p in range(1, max_period + 1):
                     line_x = p * 720 if p <= 4 else 2880 + (p - 4) * 300
-                    style = "solid" if p == 4 else "dash"
-                    color = "rgba(0,0,0,0.3)" if p == 4 else "rgba(0,0,0,0.1)"
-                    fig.add_vline(x=line_x, line_dash=style, line_color=color)
+                    fig.add_vline(x=line_x, line_dash="dash", line_color="rgba(0,0,0,0.2)")
 
                 # Blue Trace (Above 50%)
                 fig.add_trace(go.Scatter(
-                    x=x_above, y=y_above,
-                    mode='lines',
-                    line=dict(color='#3b82f6', width=3),
-                    name='Home Advantage',
-                    hoverinfo='skip',
-                    connectgaps=False
+                    x=x_above, y=y_above, mode='lines', 
+                    line=dict(color='#3b82f6', width=3), 
+                    connectgaps=False, showlegend=False,
+                    hoverinfo='skip'
                 ))
-
                 # Red Trace (Below 50%)
                 fig.add_trace(go.Scatter(
-                    x=x_below, y=y_below,
-                    mode='lines',
-                    line=dict(color='#ef4444', width=3),
-                    name='Away Advantage',
-                    hoverinfo='skip',
-                    connectgaps=False
+                    x=x_below, y=y_below, mode='lines', 
+                    line=dict(color='#ef4444', width=3), 
+                    connectgaps=False, showlegend=False,
+                    hoverinfo='skip'
                 ))
                 
-                # Transparent Trace for Hover (Full Data)
+                # Invisible Trace for Hover
                 fig.add_trace(go.Scatter(
-                    x=x_vals, y=y_vals,
-                    mode='markers' if len(chart_data) < 50 else 'lines',
+                    x=x_vals, y=y_vals, 
+                    mode='lines+markers' if len(chart_data) < 50 else 'lines', 
                     line=dict(color='rgba(0,0,0,0)', width=0),
                     marker=dict(size=4, color='rgba(0,0,0,0)'),
-                    name='Win Prob',
-                    hovertemplate="<b>Time:</b> %{customdata[0]}<br>" +
-                                "<b>Win Prob:</b> %{y:.1%}<br>" +
-                                "<b>Score:</b> %{customdata[1]}<extra></extra>",
-                    customdata=chart_data[['time_classic', 'game_result']].values
+                    hovertemplate="<b>Time:</b> %{customdata[0]}<br><b>Win Prob:</b> %{y:.1%}<br><b>Score:</b> %{customdata[1]}<extra></extra>",
+                    customdata=chart_data[['time_classic', 'game_result']].values,
+                    showlegend=False
                 ))
 
-                # Layout adjustments
                 fig.update_layout(
-                    template="plotly_white",
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    height=500,
-                    showlegend=False,
-                    xaxis=dict(
-                        title="Game Clock (seconds elapsed)",
-                        showgrid=False,
-                        range=[0, max(2880, max(x_vals) + 60 if x_vals else 2880)]
-                    ),
-                    yaxis=dict(
-                        title="Home Win Probability",
-                        tickformat=".0%",
-                        range=[0, 1],
-                        showgrid=False
-                    ),
+                    template="plotly_white", margin=dict(l=10, r=10, t=10, b=10), height=500,
+                    xaxis=dict(title="Game Clock (s)", range=[0, max(2880, max(x_vals)+60)], showgrid=False),
+                    yaxis=dict(title="Win Prob", tickformat=".0%", range=[0,1], showgrid=False),
                     hovermode="x unified"
                 )
+                st.plotly_chart(fig, width='stretch')
 
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Insufficient data to plot trend line.")
-            
-            if not st.session_state.is_polling:
-                with st.expander("🔍 Detailed In-Game Features"):
-                    st.json({
-                        "Possession ID": int(latest['possession_team_id']) if pd.notna(latest['possession_team_id']) else "N/A",
-                        "Home Timeouts": int(latest['home_timeouts_remaining']),
-                        "Away Timeouts": int(latest['away_timeouts_remaining']),
-                        "Home in Bonus": bool(latest['home_in_bonus']),
-                        "Away in Bonus": bool(latest['away_in_bonus']),
-                        "Momentum Diff": round(latest['momentum_differential'], 2)
-                    })
-
-# 2. Polling Logic
 if st.session_state.is_polling:
-    st.caption(f"Next update in {poll_interval} seconds...")
-    time.sleep(poll_interval)
+    time.sleep(st.session_state.poll_interval)
     st.rerun()
-else:
-    if history is None:
-        st.info("👋 Welcome! Enter a Game ID and click 'Analyze History' or 'Start Live' to begin.")
-        st.image("nba_feature_importance.png", caption="Model Feature Importance", use_container_width=True)
-
-# Footer
-st.markdown("---")
-st.caption("Data provided by nba_api. Predictions powered by XGBoost. Built for the NBA Real-Time WP Predictor project.")

@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import os
 import sys
+from collections import deque
 from nba_api.stats.endpoints import playbyplayv3
 
 # Add the project root to sys.path so 'src' can be found when running directly
@@ -47,27 +48,33 @@ def fetch_latest_pbp(game_id):
         print(f"[!] Error fetching PBP data: {e}")
         return None
 
-def print_scoreboard(period, clock, score_diff, win_prob):
-    """Prints a beautiful live scoreboard to the console."""
+def print_scoreboard(period, clock, score_diff, results):
+    """Prints a beautiful live scoreboard to the console with ensemble predictions."""
     # Convert period to Q1, Q2, etc.
     q_str = f"Q{period}" if period <= 4 else f"OT{period-4}"
     
-    # Format win prob as percentage
-    prob_pct = win_prob * 100
+    # Format win probs as percentages
+    final_prob = results.get('final_win_probability', 0.5) * 100
+    xgb_prob = results.get('xgb_prob', 0.5) * 100
+    lstm_prob = results.get('lstm_prob', 0.5) * 100
     
     # Score diff sign
     diff_str = f"+{score_diff}" if score_diff > 0 else str(score_diff)
     
-    print("-" * 50)
+    print("-" * 65)
     print(f" LIVE SCOREBOARD | [{q_str} {clock}]")
-    print("-" * 50)
-    print(f" Score Diff: {diff_str.rjust(3)} | Home Win Prob: {prob_pct:5.1f}%")
-    print("-" * 50)
+    print("-" * 65)
+    print(f" Score Diff: {diff_str.rjust(3)} | Final Win Prob: {final_prob:5.1f}%")
+    print(f" (XGB: {xgb_prob:4.0f}%, LSTM: {lstm_prob:4.0f}%)")
+    print("-" * 65)
 
 def run_poller(game_id):
     """Main loop for polling live game data and getting predictions."""
     print(f"[*] Starting Live Poller for Game ID: {game_id}")
     print(f"[*] Polling every 15 seconds. Press Ctrl+C to stop.\n")
+
+    # Initialize rolling sequence for LSTM (maxlen=15)
+    rolling_sequence = deque(maxlen=15)
 
     while True:
         try:
@@ -76,15 +83,13 @@ def run_poller(game_id):
             
             if df_pbp is not None and not df_pbp.empty:
                 # 2. Process features using the engine from src/features/in_game.py
-                # This automatically handles score, time, possession, timeouts, and bonus!
-                # Since calculate_in_game_features is vectorized for history, it's perfect.
                 processed_df = calculate_in_game_features(df_pbp)
                 
                 # Get the absolute latest state
                 latest_state = processed_df.iloc[-1]
                 
-                # 3. Construct the payload
-                payload = {
+                # Construct individual feature state
+                current_features = {
                     "score_differential": int(latest_state['score_differential']),
                     "seconds_remaining_in_game": float(latest_state['seconds_remaining_in_game']),
                     "possession_team_id": int(latest_state['possession_team_id']) if pd.notna(latest_state['possession_team_id']) else 0,
@@ -98,18 +103,24 @@ def run_poller(game_id):
                     "away_in_bonus": int(latest_state['away_in_bonus'])
                 }
                 
+                # Append to rolling sequence
+                rolling_sequence.append(current_features)
+                
+                # 3. Construct the Ensemble Payload
+                payload = {"sequence": list(rolling_sequence)}
+                
                 # 4. Request Win Probability from our FastAPI server
                 response = requests.post(API_URL, json=payload)
                 
                 if response.status_code == 200:
-                    win_prob = response.json().get('home_win_probability', 0.5)
+                    results = response.json()
                     
                     # 5. Display the scoreboard
                     period = int(latest_state['PERIOD'])
                     clock = latest_state['PCTIMESTRING']
                     score_diff = int(latest_state['score_differential'])
                     
-                    print_scoreboard(period, clock, score_diff, win_prob)
+                    print_scoreboard(period, clock, score_diff, results)
                 else:
                     print(f"[!] API Error ({response.status_code}): {response.text}")
 
@@ -162,7 +173,6 @@ if __name__ == "__main__":
     
     if test_passed:
         # 2. Run the real poller (Only if test passes)
-        # Note: This will loop forever until interrupted
         try:
             run_poller(GAME_ID)
         except KeyboardInterrupt:
