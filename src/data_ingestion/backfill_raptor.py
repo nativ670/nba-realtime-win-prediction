@@ -174,8 +174,14 @@ def backfill_raptor_advantage():
                 
                 desc = row['description'] if pd.notna(row['description']) else ""
                 
-                # Use EVENTMSGTYPE == 8 for substitution detection
-                if row['EVENTMSGTYPE'] == 8:
+                # Robust substitution detection
+                is_sub = (
+                    (row.get('EVENTMSGTYPE') == 8) or 
+                    (normalize_name(row.get('actionType', '')) == 'substitution') or 
+                    (normalize_name(row.get('EVENTMSGTYPE_STR', '')) == 'substitution')
+                )
+                
+                if is_sub:
                     # Player going OUT (playerName)
                     out_name = normalize_name(row['playerName'])
                     if out_name not in entered_names[tid] and len(starters[tid]) < 5:
@@ -209,7 +215,14 @@ def backfill_raptor_advantage():
             for _, row in game_df.iterrows():
                 tid = int(row['PLAYER1_TEAM_ID']) if pd.notna(row['PLAYER1_TEAM_ID']) else 0
                 
-                if row['EVENTMSGTYPE'] == 8 and tid in [home_team_id, away_team_id]:
+                # Robust substitution detection
+                is_sub = (
+                    (row.get('EVENTMSGTYPE') == 8) or 
+                    (normalize_name(row.get('actionType', '')) == 'substitution') or 
+                    (normalize_name(row.get('EVENTMSGTYPE_STR', '')) == 'substitution')
+                )
+                
+                if is_sub and tid in [home_team_id, away_team_id]:
                     desc = row['description'] if pd.notna(row['description']) else ""
                     out_name = normalize_name(row['playerName'])
                     

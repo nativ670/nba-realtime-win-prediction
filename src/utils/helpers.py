@@ -78,17 +78,17 @@ def standardize_pbp_v3(df_pbp):
     # Map actionType to EVENTMSGTYPE (Heuristic)
     # 1=Make, 2=Miss, 4=Rebound, 5=Turnover, 6=Foul, 9=Timeout
     event_map = {
-        'made': 1,
-        'missed': 2,
-        'rebound': 4,
-        'turnover': 5,
-        'timeout': 9,
-        'foul': 6,
-        'violation': 7,
-        'substitution': 8,
+        'Made Shot': 1,
+        'Missed Shot': 2,
+        'Rebound': 4,
+        'Turnover': 5,
+        'Timeout': 9,
+        'Foul': 6,
+        'Violation': 7,
+        'Substitution': 8,
         'period': 10,
-        'jumpball': 11,
-        'free-throw': 3
+        'Jump Ball': 11,
+        'Free Throw': 3
     }
     if 'EVENTMSGTYPE_STR' in df.columns:
         df['EVENTMSGTYPE'] = df['EVENTMSGTYPE_STR'].map(event_map).fillna(0)
