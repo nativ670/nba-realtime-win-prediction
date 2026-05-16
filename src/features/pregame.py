@@ -164,7 +164,7 @@ def add_external_features(df, elo_df):
     # Neil Paine dataset uses home (team1) and away (team2)
     elo_cols = ['date', 'team1', 'team2', 'elo1_pre', 'elo2_pre', 'playoff']
     elo_clean = elo_df[elo_cols].copy()
-    elo_clean['date'] = pd.to_datetime(elo_clean['date'])
+    elo_clean['date'] = pd.to_datetime(elo_clean['date'], format='mixed')
     
     # Standardize our team abbreviations to match Neil Paine's
     df['neil_team'] = df['team_abbreviation'].replace(ELO_TEAM_MAP)

@@ -20,7 +20,7 @@ FEATURES = [
     'live_raptor_advantage'
 ]
 
-MODEL_PATH = 'src/models/xgb_v2_10man.json'
+MODEL_PATH = 'src/models/xgb_v3_10man.json'
 SEASONS_DIR = 'data/processed/seasons'
 
 def load_inference_model(model_path):

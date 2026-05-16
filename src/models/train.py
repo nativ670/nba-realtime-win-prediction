@@ -114,7 +114,7 @@ def plot_and_save_importance(model, output_path='nba_feature_importance.png'):
     plt.savefig(output_path)
     plt.close()
 
-def save_model(model, output_path='src/models/xgb_v2_10man.json'):
+def save_model(model, output_path='src/models/xgb_v3_10man.json'):
     """Saves the trained model to a JSON file."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     print(f"Saving model to {output_path}...")
@@ -122,7 +122,7 @@ def save_model(model, output_path='src/models/xgb_v2_10man.json'):
 
 if __name__ == '__main__':
     # Mandatory Shootaround: Lightweight test with mock data
-    DATA_PATH = 'data/processed/training_data.parquet'
+    DATA_PATH = 'data/processed/seasons'
     
     try:
         if os.path.exists(DATA_PATH):
