@@ -1,41 +1,37 @@
 name: Daily NBA Data Update
-
-on:
-  schedule:
-    - cron: '0 6 * * *' # Runs daily at 6:00 AM UTC
+on:  
+  schedule:    
+    - cron: '0 6 * * *' # Runs daily at 6:00 AM UTC  
   workflow_dispatch: # Allows manual triggering
 
-jobs:
-  update-nba-data:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+# 🚨 THE CHEAT CODE: Forces GitHub to use the new engine and silences the warning
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy nba_api requests pyarrow
-
-    - name: Update Team Elo Ratings
-      run: python src/data_ingestion/update_elo.py
-
-    - name: Update Player RAPTOR Ratings
-      run: python src/features/raptor_engine.py
-
-    - name: Update Play-by-Play Data
-      run: python src/data_ingestion/update_pbp.py
-
-    - name: Commit and push changes
-      run: |
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add data/processed/live_elo.csv data/processed/current_raptor.csv data/processed/seasons/*.parquet
-        git commit -m "data: auto-update team elo, player raptor, and pbp data [skip ci]" || echo "No changes to commit"
+jobs:  
+  update-nba-data:    
+    runs-on: ubuntu-latest        
+    steps:    
+    - name: Checkout repository      
+      uses: actions/checkout@v4    
+    - name: Set up Python      
+      uses: actions/setup-python@v5      
+      with:        
+        python-version: '3.10'    
+    - name: Install dependencies      
+      run: |        
+        python -m pip install --upgrade pip        
+        pip install pandas numpy nba_api requests pyarrow    
+    - name: Update Team Elo Ratings      
+      run: python src/data_ingestion/update_elo.py    
+    - name: Update Player RAPTOR Ratings      
+      run: python src/features/raptor_engine.py    
+    - name: Update Play-by-Play Data      
+      run: python src/data_ingestion/update_pbp.py    
+    - name: Commit and push changes      
+      run: |        
+        git config --global user.name "github-actions[bot]"        
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"        
+        git add data/processed/live_elo.csv data/processed/current_raptor.csv data/processed/seasons/*.parquet        
+        git commit -m "data: auto-update team elo, player raptor, and pbp data [skip ci]" || echo "No changes to commit"        
         git push origin main
