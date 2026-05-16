@@ -4,7 +4,6 @@ on:
     - cron: '0 6 * * *' # Runs daily at 6:00 AM UTC  
   workflow_dispatch: # Allows manual triggering
 
-# 🚨 THE CHEAT CODE: Forces GitHub to use the new engine and silences the warning
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -22,12 +21,14 @@ jobs:
       run: |        
         python -m pip install --upgrade pip        
         pip install pandas numpy nba_api requests pyarrow    
+
+    - name: Update Play-by-Play Data      
+      run: python src/data_ingestion/update_pbp.py    
+
     - name: Update Team Elo Ratings      
       run: python src/data_ingestion/update_elo.py    
     - name: Update Player RAPTOR Ratings      
       run: python src/features/raptor_engine.py    
-    - name: Update Play-by-Play Data      
-      run: python src/data_ingestion/update_pbp.py    
     - name: Commit and push changes      
       run: |        
         git config --global user.name "github-actions[bot]"        

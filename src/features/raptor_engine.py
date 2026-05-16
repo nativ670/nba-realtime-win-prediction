@@ -62,14 +62,27 @@ def fetch_player_stats():
     try:
         # Helper to fetch a specific type
         def get_phase_stats(phase):
-            p100 = leaguedashplayerstats.LeagueDashPlayerStats(
-                per_mode_detailed='Per100Possessions',
-                season=season,
-                season_type_all_star=phase
-            ).get_data_frames()[0]
-            
-            time.sleep(0.6) # Rate limit protection
-            
+            max_retries = 3
+            for attempt in range(max_retries):
+
+                try:
+                    time.sleep(2) # Rate limit protection
+
+                    p100 = leaguedashplayerstats.LeagueDashPlayerStats(
+                        per_mode_detailed='Per100Possessions',
+                        season=season,
+                        season_type_all_star=phase
+                        ).get_data_frames()[0]
+                
+                except ConnectionError as e:
+                    print(f"⚠️ NBA API hung up! Retrying {attempt + 1}/{max_retries} in 5 seconds...")
+                    time.sleep(5)
+
+                except Exception as e:
+                    # If it's a different kind of error, just print it
+                    print(f"An unexpected error occurred: {e}")
+                    break
+                        
             pg = leaguedashplayerstats.LeagueDashPlayerStats(
                 per_mode_detailed='PerGame',
                 season=season,
