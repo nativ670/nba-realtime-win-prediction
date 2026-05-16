@@ -94,7 +94,7 @@ def update_pbp():
     # 4. Add Pre-Game Features
     print("Calculating pre-game context for new games...")
     elo_df = pd.read_csv(LIVE_ELO_PATH)
-    elo_df['date'] = pd.to_datetime(elo_df['date'])
+    elo_df['date'] = pd.to_datetime(elo_df['date'], format='mixed')
     
     new_game_meta = []
     for gid in game_ids:

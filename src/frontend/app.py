@@ -428,6 +428,11 @@ if st.session_state.is_polling or st.session_state.trigger_fetch or (not st.sess
         st.session_state.trigger_fetch = False
         
         if not history.empty:
+            # Ensure history is strictly chronological to prevent zig-zag plots
+            # The NBA API sometimes inserts plays retroactively
+            history = history.sort_values(['elapsed_time', 'EVENTNUM']).reset_index(drop=True)
+            st.session_state.history = history
+
             latest = history.iloc[-1]
             render_scoreboard(latest, is_live=st.session_state.is_polling)
 
