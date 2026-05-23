@@ -49,10 +49,44 @@ def get_games_for_range(start_date, end_date):
     print(f"❌ Failed to fetch games for range after {max_retries} attempts.")
     return pd.DataFrame()
 
-def update_pbp():
-    # 1. Get games from the last 7 days (Catch-up window)
-    start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-    end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+def update_pbp(start_date=None, end_date=None):
+    # 1. Determine Catch-up Range
+    if start_date is None:
+        print("Determining catch-up range from existing PBP data...")
+        # Find the latest date in the season files
+        latest_date = None
+        if os.path.exists(SEASONS_DIR):
+            season_files = [f for f in os.listdir(SEASONS_DIR) if f.startswith("pbp_") and f.endswith(".parquet")]
+            if season_files:
+                # Get the most recent season file
+                latest_season_file = sorted(season_files)[-1]
+                df_latest = pd.read_parquet(os.path.join(SEASONS_DIR, latest_season_file))
+                if not df_latest.empty and 'GAME_ID' in df_latest.columns:
+                    # We need the game dates. Standardize PBP doesn't always have dates, 
+                    # but we can infer from GAME_ID or better, look at the meta.
+                    # For now, let's use a safe 7-day window if we can't be sure, 
+                    # or better, use the live_elo.csv as the source of truth for games.
+                    pass
+        
+        # Fallback to last 7 days if we can't easily determine, 
+        # but let's try to be smarter by looking at live_elo.csv
+        if os.path.exists(LIVE_ELO_PATH):
+            df_elo = pd.read_csv(LIVE_ELO_PATH)
+            df_elo['date'] = pd.to_datetime(df_elo['date'], errors='coerce')
+            # Find the last date that HAS scores (meaning game is finished)
+            finished_games = df_elo.dropna(subset=['score1', 'score2'])
+            if not finished_games.empty:
+                last_elo_date = finished_games['date'].max()
+                # We want to check from a few days before that to be safe, 
+                # as PBP might lag or be partially updated
+                start_date = (last_elo_date - timedelta(days=3)).strftime('%Y-%m-%d')
+            else:
+                start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        else:
+            start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            
+    if end_date is None:
+        end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
     games = get_games_for_range(start_date, end_date)
     if games.empty:

@@ -22,13 +22,9 @@ jobs:
         python -m pip install --upgrade pip        
         pip install pandas numpy nba_api requests pyarrow    
 
-    - name: Update Play-by-Play Data      
-      run: python src/data_ingestion/update_pbp.py    
+    - name: Run Daily Update Pipeline
+      run: python src/data_ingestion/daily_update.py
 
-    - name: Update Team Elo Ratings      
-      run: python src/data_ingestion/update_elo.py    
-    - name: Update Player RAPTOR Ratings      
-      run: python src/features/raptor_engine.py    
     - name: Commit and push changes      
       run: |        
         git config --global user.name "github-actions[bot]"        

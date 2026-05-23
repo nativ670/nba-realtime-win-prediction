@@ -165,8 +165,17 @@ def update_elo():
         # 4. Fetch games for target date
         games = get_games_for_date(target_date)
         if games.empty:
-            print(f"No games found for {target_date}. Adding empty entry to prevent re-scan.")
-            # We don't actually add empty entries to the CSV, but the loop advances
+            print(f"No games found for {target_date}. Recording empty date to prevent re-scan.")
+            # Add a placeholder row with just the date to advance the max date
+            new_rows.append({
+                'date': target_date, 'season': current_season, 'neutral': 0, 'playoff': np.nan,
+                'team1': None, 'team2': None, 'elo1_pre': np.nan, 'elo2_pre': np.nan,
+                'elo_prob1': np.nan, 'elo_prob2': np.nan, 'elo1_post': np.nan, 'elo2_post': np.nan,
+                'score1': np.nan, 'score2': np.nan, 'is_home': np.nan
+            })
+            # Add to df_live immediately so it's saved even if no games follow
+            df_live = pd.concat([df_live, pd.DataFrame(new_rows)], ignore_index=True)
+            new_rows = []
             current_date_dt += timedelta(days=1)
             continue
 
