@@ -37,7 +37,7 @@ from src.utils.helpers import standardize_pbp_v3, TEAM_COORDS
 def get_games_for_range(start_date: str, end_date: str) -> pd.DataFrame:
     """
     Fetches games played in a date range from nba_api using the shared
-    retry wrapper (nba_api_call) instead of a local retry loop.
+    retry wrapper (nba_api_call) with 30-day chunking to avoid timeouts.
 
     Parameters
     ----------
@@ -49,15 +49,30 @@ def get_games_for_range(start_date: str, end_date: str) -> pd.DataFrame:
     pd.DataFrame  — LeagueGameFinder results, or empty DataFrame on failure.
     """
     print(f"Checking for games between {start_date} and {end_date}...")
-
-    games = nba_api_call(
-        leaguegamefinder.LeagueGameFinder,
-        df_index=0,
-        date_from_nullable=start_date,
-        date_to_nullable=end_date,
-        league_id_nullable='00'
-    )
-    return games
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date)
+    
+    all_chunks = []
+    curr_start = start_dt
+    
+    while curr_start <= end_dt:
+        curr_end = min(curr_start + timedelta(days=30), end_dt)
+        print(f"  -> Chunk: {curr_start.strftime('%Y-%m-%d')} to {curr_end.strftime('%Y-%m-%d')}")
+        games = nba_api_call(
+            leaguegamefinder.LeagueGameFinder,
+            df_index=0,
+            date_from_nullable=curr_start.strftime('%Y-%m-%d'),
+            date_to_nullable=curr_end.strftime('%Y-%m-%d'),
+            league_id_nullable='00'
+        )
+        if not games.empty:
+            all_chunks.append(games)
+            
+        curr_start = curr_end + timedelta(days=1)
+        
+    if all_chunks:
+        return pd.concat(all_chunks, ignore_index=True)
+    return pd.DataFrame()
 
 
 # ==============================================================================

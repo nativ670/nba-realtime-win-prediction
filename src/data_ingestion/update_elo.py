@@ -35,15 +35,31 @@ def calculate_new_elos(elo1_pre, elo2_pre, score1, score2, is_home=True):
     return elo1_pre + shift, elo2_pre - shift
 
 def get_games_for_date_range(start_date, end_date):
-    """Fetches games played in a date range from nba_api with retry logic."""
+    """Fetches games played in a date range from nba_api with chunking & retry logic."""
     print(f"Fetching games from {start_date} to {end_date}...")
-    games = nba_api_call(
-        leaguegamefinder.LeagueGameFinder,
-        date_from_nullable=start_date,
-        date_to_nullable=end_date,
-        league_id_nullable='00'
-    )
-    return games
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date)
+    
+    all_chunks = []
+    curr_start = start_dt
+    
+    while curr_start <= end_dt:
+        curr_end = min(curr_start + timedelta(days=30), end_dt)
+        print(f"  -> Chunk: {curr_start.strftime('%Y-%m-%d')} to {curr_end.strftime('%Y-%m-%d')}")
+        games = nba_api_call(
+            leaguegamefinder.LeagueGameFinder,
+            date_from_nullable=curr_start.strftime('%Y-%m-%d'),
+            date_to_nullable=curr_end.strftime('%Y-%m-%d'),
+            league_id_nullable='00'
+        )
+        if not games.empty:
+            all_chunks.append(games)
+            
+        curr_start = curr_end + timedelta(days=1)
+        
+    if all_chunks:
+        return pd.concat(all_chunks, ignore_index=True)
+    return pd.DataFrame()
 
 def update_elo():
     # 1. Load existing Elo
