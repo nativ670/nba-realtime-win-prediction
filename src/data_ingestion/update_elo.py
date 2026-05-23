@@ -94,7 +94,7 @@ def get_games_for_date(target_date):
     print(f"❌ Failed to fetch games for {target_date} after {max_retries} attempts.")
     return pd.DataFrame()
 
-def update_elo(target_date=None):
+def update_elo():
     # 1. Load existing Elo
     if os.path.exists(LIVE_ELO_PATH):
         df_live = pd.read_csv(LIVE_ELO_PATH)
@@ -111,105 +111,120 @@ def update_elo(target_date=None):
         os.makedirs(os.path.dirname(LIVE_ELO_PATH), exist_ok=True)
         df_live.to_csv(LIVE_ELO_PATH, index=False)
 
-    # 2. Determine target date
-    if target_date is None:
-        target_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    # 2. Determine Catch-up Range
+    last_date = df_live['date'].max()
+    yesterday = datetime.now() - timedelta(days=1)
     
-    # Check if we already processed this date to avoid duplicates
-    if not df_live.empty:
-        processed_dates = df_live['date'].dt.strftime('%Y-%m-%d').unique()
-        if target_date in processed_dates:
-            print(f"Date {target_date} already processed. Skipping.")
-            return
+    # Floor both to midnight for comparison
+    last_date = last_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # 3. Get the latest Elo for each team
-    latest_elos = {}
-    teams = pd.concat([df_live['team1'], df_live['team2']]).unique()
-    
-    # Optimize: only look at the most recent 1000 rows to find latest elos
-    recent_df = df_live.tail(2000) 
-    for team in teams:
-        t1_rows = recent_df[recent_df['team1'] == team]
-        t2_rows = recent_df[recent_df['team2'] == team]
-        
-        last_t1 = t1_rows.iloc[-1] if not t1_rows.empty else None
-        last_t2 = t2_rows.iloc[-1] if not t2_rows.empty else None
-        
-        if last_t1 is not None and last_t2 is not None:
-            if last_t1['date'] >= last_t2['date']:
-                latest_elos[team] = last_t1['elo1_post']
-            else:
-                latest_elos[team] = last_t2['elo2_post']
-        elif last_t1 is not None:
-            latest_elos[team] = last_t1['elo1_post']
-        elif last_t2 is not None:
-            latest_elos[team] = last_t2['elo2_post']
-        else:
-            # If not in recent 2000, search whole df (slow fallback)
-            t1_rows_full = df_live[df_live['team1'] == team]
-            t2_rows_full = df_live[df_live['team2'] == team]
-            last_t1 = t1_rows_full.iloc[-1] if not t1_rows_full.empty else None
-            last_t2 = t2_rows_full.iloc[-1] if not t2_rows_full.empty else None
-            if last_t1 is not None and last_t2 is not None:
-                latest_elos[team] = last_t1['elo1_post'] if last_t1['date'] >= last_t2['date'] else last_t2['elo2_post']
-            elif last_t1 is not None: latest_elos[team] = last_t1['elo1_post']
-            elif last_t2 is not None: latest_elos[team] = last_t2['elo2_post']
-            else: latest_elos[team] = 1500
-
-    # 4. Fetch games for target date
-    games = get_games_for_date(target_date)
-    if games.empty:
-        print(f"No games found for {target_date}.")
+    if last_date >= yesterday:
+        print(f"Data is up to date (Last entry: {last_date.strftime('%Y-%m-%d')}).")
         return
 
-    # 5. Process games...
-    game_ids = games['GAME_ID'].unique()
-    new_rows = []
-    last_season = df_live['season'].max()
-
-    # Determine season for target date
-    game_dt = datetime.strptime(target_date, '%Y-%m-%d')
-    current_season = game_dt.year + 1 if game_dt.month >= 10 else game_dt.year
-
-    # Offseason regression check
-    if current_season > last_season:
-        print(f"New season detected ({current_season}). Applying regression...")
-        for t in latest_elos:
-            latest_elos[t] = (OFFSEASON_REGRESSION_FACTOR * latest_elos[t]) + ((1 - OFFSEASON_REGRESSION_FACTOR) * OFFSEASON_MEAN)
-        last_season = current_season
-
-    for gid in game_ids:
-        game_pair = games[games['GAME_ID'] == gid]
-        if len(game_pair) != 2: continue
-            
-        row_a, row_b = game_pair.iloc[0], game_pair.iloc[1]
-        home_row, away_row = (row_b, row_a) if '@' in row_a['MATCHUP'] else (row_a, row_b)
-            
-        team_h, team_a = home_row['TEAM_ABBREVIATION'], away_row['TEAM_ABBREVIATION']
-        score_h, score_a = home_row['PTS'], away_row['PTS']
-
-        elo_h_pre, elo_a_pre = latest_elos.get(team_h, 1500), latest_elos.get(team_a, 1500)
-        prob_h = calculate_expected_score(elo_h_pre, elo_a_pre, hca=HOME_ADVANTAGE)
-        elo_h_post, elo_a_post = calculate_new_elos(elo_h_pre, elo_a_pre, score_h, score_a, is_home=True)
+    # Iterate through each missing day
+    current_date_dt = last_date + timedelta(days=1)
+    while current_date_dt <= yesterday:
+        target_date = current_date_dt.strftime('%Y-%m-%d')
         
-        new_rows.append({
-            'date': target_date, 'season': current_season, 'neutral': 0, 'playoff': np.nan,
-            'team1': team_h, 'team2': team_a, 'elo1_pre': elo_h_pre, 'elo2_pre': elo_a_pre,
-            'elo_prob1': prob_h, 'elo_prob2': 1-prob_h, 'elo1_post': elo_h_post, 'elo2_post': elo_a_post,
-            'score1': score_h, 'score2': score_a, 'is_home': 1
-        })
-        new_rows.append({
-            'date': target_date, 'season': current_season, 'neutral': 0, 'playoff': np.nan,
-            'team1': team_a, 'team2': team_h, 'elo1_pre': elo_a_pre, 'elo2_pre': elo_h_pre,
-            'elo_prob1': 1-prob_h, 'elo_prob2': prob_h, 'elo1_post': elo_a_post, 'elo2_post': elo_h_post,
-            'score1': score_a, 'score2': score_h, 'is_home': 0
-        })
-        latest_elos[team_h], latest_elos[team_a] = elo_h_post, elo_a_post
+        # 3. Get the latest Elo for each team (Recalculate for each day in loop)
+        latest_elos = {}
+        teams = pd.concat([df_live['team1'], df_live['team2']]).unique()
+        
+        # Optimize: only look at the most recent 2000 rows to find latest elos
+        recent_df = df_live.tail(2000) 
+        for team in teams:
+            t1_rows = recent_df[recent_df['team1'] == team]
+            t2_rows = recent_df[recent_df['team2'] == team]
+            
+            last_t1 = t1_rows.iloc[-1] if not t1_rows.empty else None
+            last_t2 = t2_rows.iloc[-1] if not t2_rows.empty else None
+            
+            if last_t1 is not None and last_t2 is not None:
+                if last_t1['date'] >= last_t2['date']:
+                    latest_elos[team] = last_t1['elo1_post']
+                else:
+                    latest_elos[team] = last_t2['elo2_post']
+            elif last_t1 is not None:
+                latest_elos[team] = last_t1['elo1_post']
+            elif last_t2 is not None:
+                latest_elos[team] = last_t2['elo2_post']
+            else:
+                # Fallback to full search
+                t1_rows_full = df_live[df_live['team1'] == team]
+                t2_rows_full = df_live[df_live['team2'] == team]
+                last_t1 = t1_rows_full.iloc[-1] if not t1_rows_full.empty else None
+                last_t2 = t2_rows_full.iloc[-1] if not t2_rows_full.empty else None
+                if last_t1 is not None and last_t2 is not None:
+                    latest_elos[team] = last_t1['elo1_post'] if last_t1['date'] >= last_t2['date'] else last_t2['elo2_post']
+                elif last_t1 is not None: latest_elos[team] = last_t1['elo1_post']
+                elif last_t2 is not None: latest_elos[team] = last_t2['elo2_post']
+                else: latest_elos[team] = 1500
 
-    df_new = pd.DataFrame(new_rows)
-    df_updated = pd.concat([df_live, df_new], ignore_index=True)
-    df_updated.to_csv(LIVE_ELO_PATH, index=False)
-    print(f"Successfully updated {target_date} ({len(new_rows)} rows).")
+        # 4. Fetch games for target date
+        games = get_games_for_date(target_date)
+        if games.empty:
+            print(f"No games found for {target_date}. Adding empty entry to prevent re-scan.")
+            # We don't actually add empty entries to the CSV, but the loop advances
+            current_date_dt += timedelta(days=1)
+            continue
+
+        # 5. Process games...
+        game_ids = games['GAME_ID'].unique()
+        new_rows = []
+        last_season = df_live['season'].max()
+
+        # Determine season for target date
+        game_dt = datetime.strptime(target_date, '%Y-%m-%d')
+        current_season = game_dt.year + 1 if game_dt.month >= 10 else game_dt.year
+
+        # Offseason regression check
+        if current_season > last_season:
+            print(f"New season detected ({current_season}). Applying regression...")
+            for t in latest_elos:
+                latest_elos[t] = (OFFSEASON_REGRESSION_FACTOR * latest_elos[t]) + ((1 - OFFSEASON_REGRESSION_FACTOR) * OFFSEASON_MEAN)
+            last_season = current_season
+
+        for gid in game_ids:
+            game_pair = games[games['GAME_ID'] == gid]
+            if len(game_pair) != 2: continue
+                
+            row_a, row_b = game_pair.iloc[0], game_pair.iloc[1]
+            home_row, away_row = (row_b, row_a) if '@' in row_a['MATCHUP'] else (row_a, row_b)
+                
+            team_h, team_a = home_row['TEAM_ABBREVIATION'], away_row['TEAM_ABBREVIATION']
+            score_h, score_a = home_row['PTS'], away_row['PTS']
+
+            elo_h_pre, elo_a_pre = latest_elos.get(team_h, 1500), latest_elos.get(team_a, 1500)
+            prob_h = calculate_expected_score(elo_h_pre, elo_a_pre, hca=HOME_ADVANTAGE)
+            elo_h_post, elo_a_post = calculate_new_elos(elo_h_pre, elo_a_pre, score_h, score_a, is_home=True)
+            
+            new_rows.append({
+                'date': target_date, 'season': current_season, 'neutral': 0, 'playoff': np.nan,
+                'team1': team_h, 'team2': team_a, 'elo1_pre': elo_h_pre, 'elo2_pre': elo_a_pre,
+                'elo_prob1': prob_h, 'elo_prob2': 1-prob_h, 'elo1_post': elo_h_post, 'elo2_post': elo_a_post,
+                'score1': score_h, 'score2': score_a, 'is_home': 1
+            })
+            new_rows.append({
+                'date': target_date, 'season': current_season, 'neutral': 0, 'playoff': np.nan,
+                'team1': team_a, 'team2': team_h, 'elo1_pre': elo_a_pre, 'elo2_pre': elo_h_pre,
+                'elo_prob1': 1-prob_h, 'elo_prob2': prob_h, 'elo1_post': elo_a_post, 'elo2_post': elo_h_post,
+                'score1': score_a, 'score2': score_h, 'is_home': 0
+            })
+            latest_elos[team_h], latest_elos[team_a] = elo_h_post, elo_a_post
+
+        if new_rows:
+            df_new = pd.DataFrame(new_rows)
+            df_live = pd.concat([df_live, df_new], ignore_index=True)
+            print(f"Successfully processed {target_date}.")
+        
+        current_date_dt += timedelta(days=1)
+
+    # 6. Save final updated file
+    df_live.to_csv(LIVE_ELO_PATH, index=False)
+    print(f"Elo update complete. Final date: {df_live['date'].max().strftime('%Y-%m-%d')}")
+
 
 if __name__ == "__main__":
     update_elo()
