@@ -7,10 +7,8 @@ import os
 import sys
 import glob
 
-# --- Path Injection ---
-# Add the project root to sys.path so 'src' can be found
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
+from src.config import MODEL_FEATURES
+from src.utils.nba_client import nba_api_call
 from nba_api.stats.endpoints import playbyplayv3, boxscoresummaryv3
 from src.features.in_game import calculate_in_game_features
 from src.features.substitution_tracker import SubstitutionTracker
@@ -143,6 +141,10 @@ if 'dist_trav' not in st.session_state:
     st.session_state.dist_trav = 300.0
 if 'poll_interval' not in st.session_state:
     st.session_state.poll_interval = 15
+if 'last_action_number' not in st.session_state:
+    st.session_state.last_action_number = 0
+if 'accumulated_features' not in st.session_state:
+    st.session_state.accumulated_features = pd.DataFrame()
 
 # --- Data Loading ---
 @st.cache_data
@@ -208,30 +210,54 @@ def fetch_game_metadata(game_id):
         return {}
 
 def fetch_and_process(game_id):
-    """Fetches PBP data and runs it through the feature engineering engine."""
+    """Fetches PBP data and incrementally runs it through the feature engineering engine."""
     try:
         # Initialize Substitution Tracker if not present or game changed
         if "sub_tracker" not in st.session_state or st.session_state.get("tracker_game_id") != game_id:
             st.session_state.sub_tracker = SubstitutionTracker(game_id)
             st.session_state.tracker_game_id = game_id
+            st.session_state.last_action_number = 0
+            st.session_state.accumulated_features = pd.DataFrame()
 
-        if st.session_state.is_polling:
-             pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
-        else:
-            with st.spinner(f"Fetching Play-by-Play for {game_id}..."):
-                pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
+        if not st.session_state.is_polling:
+            st.spinner(f"Fetching Play-by-Play for {game_id}...")
+            
+        df_pbp_raw = nba_api_call(
+            playbyplayv3.PlayByPlayV3,
+            df_index=0,
+            timeout=30,
+            game_id=game_id
+        )
         
-        df_pbp_raw = pbp.get_data_frames()[0]
         if df_pbp_raw.empty:
             return None
+            
+        # Figure out the action number column
+        action_col = 'actionNumber' if 'actionNumber' in df_pbp_raw.columns else 'EVENTNUM'
+        max_action = int(df_pbp_raw[action_col].max()) if action_col in df_pbp_raw.columns else 0
         
-        df_pbp = standardize_pbp_v3(df_pbp_raw)
-        df_features = calculate_in_game_features(df_pbp)
+        # Incremental filter
+        if st.session_state.last_action_number > 0 and action_col in df_pbp_raw.columns:
+            df_new_raw = df_pbp_raw[df_pbp_raw[action_col] > st.session_state.last_action_number].copy()
+        else:
+            df_new_raw = df_pbp_raw.copy()
+            
+        if df_new_raw.empty:
+            return st.session_state.accumulated_features
+        
+        df_new = standardize_pbp_v3(df_new_raw)
+        df_new_features = calculate_in_game_features(df_new)
         
         # Add Live RAPTOR Advantage
-        df_features = st.session_state.sub_tracker.process_pbp(df_features)
+        df_new_features = st.session_state.sub_tracker.process_pbp(df_new_features)
         
-        return df_features
+        st.session_state.last_action_number = max_action
+        st.session_state.accumulated_features = pd.concat(
+            [st.session_state.accumulated_features, df_new_features], 
+            ignore_index=True
+        )
+        
+        return st.session_state.accumulated_features
     except Exception as e:
         st.error(f"Error fetching data: {e}")
         return None

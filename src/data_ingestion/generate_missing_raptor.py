@@ -8,36 +8,11 @@ from nba_api.stats.endpoints import leaguedashplayerstats
 # --- Path Injection ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-# --- Configuration & Weights (Reused from raptor_engine.py) ---
-RAW_DATA_DIR = "data/raw"
+# --- Configuration & Weights (Reused from src.config) ---
+from src.config import RAPTOR_OFF_WEIGHTS, RAPTOR_DEF_WEIGHTS, RAW_DIR
+from src.utils.nba_client import nba_api_call
 
-OFF_WEIGHTS = {
-    'intercept': -3.88704,
-    'MPG': 0.026112,
-    'PTS': 0.662784,
-    'TSA': -0.51622,
-    'AST': 0.430454,
-    'TOV': -0.893465,
-    'ORB': 0.303023,
-    'DRB': -0.085637,
-    'STL': 0.418092,
-    'BLK': -0.230734,
-    'PF': -0.108369
-}
-
-DEF_WEIGHTS = {
-    'intercept': -3.079144,
-    'MPG': 0.033637,
-    'PTS': -0.081412,
-    'TSA': 0.025422,
-    'AST': -0.025109,
-    'TOV': -0.055809,
-    'ORB': -0.099034,
-    'DRB': 0.191569,
-    'STL': 1.150891,
-    'BLK': 0.611107,
-    'PF': 0.010649
-}
+RAW_DATA_DIR = str(RAW_DIR)
 
 def fetch_season_stats(season_str):
     """
@@ -46,20 +21,22 @@ def fetch_season_stats(season_str):
     print(f"Fetching stats for {season_str}...")
     try:
         # Get Per 100 Possessions
-        p100 = leaguedashplayerstats.LeagueDashPlayerStats(
+        p100 = nba_api_call(
+            leaguedashplayerstats.LeagueDashPlayerStats,
+            df_index=0,
             per_mode_detailed='Per100Possessions',
             season=season_str,
             season_type_all_star='Regular Season'
-        ).get_data_frames()[0]
-        
-        time.sleep(1.0) # Rate limit protection
+        )
         
         # Get Per Game (for MPG)
-        pg = leaguedashplayerstats.LeagueDashPlayerStats(
+        pg = nba_api_call(
+            leaguedashplayerstats.LeagueDashPlayerStats,
+            df_index=0,
             per_mode_detailed='PerGame',
             season=season_str,
             season_type_all_star='Regular Season'
-        ).get_data_frames()[0]
+        )
         
         # Select only MPG from PG and rename before merge to avoid conflicts
         df_pg_min = pg[['PLAYER_ID', 'MIN']].rename(columns={'MIN': 'MPG'})
@@ -84,32 +61,32 @@ def calculate_proxy_raptor(df):
     
     # Offensive RAPTOR
     df['raptor_off'] = (
-        OFF_WEIGHTS['intercept'] +
-        OFF_WEIGHTS['MPG'] * df['MPG'] +
-        OFF_WEIGHTS['PTS'] * df['PTS'] +
-        OFF_WEIGHTS['TSA'] * df['TSA'] +
-        OFF_WEIGHTS['AST'] * df['AST'] +
-        OFF_WEIGHTS['TOV'] * df['TOV'] +
-        OFF_WEIGHTS['ORB'] * df['OREB'] +
-        OFF_WEIGHTS['DRB'] * df['DREB'] +
-        OFF_WEIGHTS['STL'] * df['STL'] +
-        OFF_WEIGHTS['BLK'] * df['BLK'] +
-        OFF_WEIGHTS['PF']  * df['PF']
+        RAPTOR_OFF_WEIGHTS['intercept'] +
+        RAPTOR_OFF_WEIGHTS['MPG'] * df['MPG'] +
+        RAPTOR_OFF_WEIGHTS['PTS'] * df['PTS'] +
+        RAPTOR_OFF_WEIGHTS['TSA'] * df['TSA'] +
+        RAPTOR_OFF_WEIGHTS['AST'] * df['AST'] +
+        RAPTOR_OFF_WEIGHTS['TOV'] * df['TOV'] +
+        RAPTOR_OFF_WEIGHTS['ORB'] * df['OREB'] +
+        RAPTOR_OFF_WEIGHTS['DRB'] * df['DREB'] +
+        RAPTOR_OFF_WEIGHTS['STL'] * df['STL'] +
+        RAPTOR_OFF_WEIGHTS['BLK'] * df['BLK'] +
+        RAPTOR_OFF_WEIGHTS['PF']  * df['PF']
     )
     
     # Defensive RAPTOR
     df['raptor_def'] = (
-        DEF_WEIGHTS['intercept'] +
-        DEF_WEIGHTS['MPG'] * df['MPG'] +
-        DEF_WEIGHTS['PTS'] * df['PTS'] +
-        DEF_WEIGHTS['TSA'] * df['TSA'] +
-        DEF_WEIGHTS['AST'] * df['AST'] +
-        DEF_WEIGHTS['TOV'] * df['TOV'] +
-        DEF_WEIGHTS['ORB'] * df['OREB'] +
-        DEF_WEIGHTS['DRB'] * df['DREB'] +
-        DEF_WEIGHTS['STL'] * df['STL'] +
-        DEF_WEIGHTS['BLK'] * df['BLK'] +
-        DEF_WEIGHTS['PF']  * df['PF']
+        RAPTOR_DEF_WEIGHTS['intercept'] +
+        RAPTOR_DEF_WEIGHTS['MPG'] * df['MPG'] +
+        RAPTOR_DEF_WEIGHTS['PTS'] * df['PTS'] +
+        RAPTOR_DEF_WEIGHTS['TSA'] * df['TSA'] +
+        RAPTOR_DEF_WEIGHTS['AST'] * df['AST'] +
+        RAPTOR_DEF_WEIGHTS['TOV'] * df['TOV'] +
+        RAPTOR_DEF_WEIGHTS['ORB'] * df['OREB'] +
+        RAPTOR_DEF_WEIGHTS['DRB'] * df['DREB'] +
+        RAPTOR_DEF_WEIGHTS['STL'] * df['STL'] +
+        RAPTOR_DEF_WEIGHTS['BLK'] * df['BLK'] +
+        RAPTOR_DEF_WEIGHTS['PF']  * df['PF']
     )
     
     df['raptor_total'] = df['raptor_off'] + df['raptor_def']

@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import glob
 import os
+import sys
 from tqdm import tqdm
 
 # ==============================================================================
@@ -11,21 +12,10 @@ from tqdm import tqdm
 # suitable for training an LSTM Neural Network.
 
 # Constants
-SEQUENCE_LENGTH = 15
-FEATURES = [
-    'score_differential', 
-    'seconds_remaining_in_game', 
-    'possession_team_id', 
-    'elo_advantage', 
-    'rest_advantage', 
-    'distance_traveled', 
-    'momentum_differential', 
-    'home_timeouts_remaining', 
-    'away_timeouts_remaining', 
-    'home_in_bonus', 
-    'away_in_bonus',
-    'live_raptor_advantage'
-]
+from src.config import MODEL_FEATURES, LSTM_SEQUENCE_LENGTH
+
+SEQUENCE_LENGTH = LSTM_SEQUENCE_LENGTH
+FEATURES = MODEL_FEATURES
 TARGET = 'home_win'
 
 def build_lstm_sequences():

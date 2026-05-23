@@ -12,39 +12,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from requests.exceptions import ReadTimeout, ConnectionError
 
+from src.config import RAPTOR_OFF_WEIGHTS, RAPTOR_DEF_WEIGHTS, RAPTOR_PATH
+from src.utils.nba_client import nba_api_call
+
 # --- Configuration ---
-PROCESSED_DATA_DIR = "data/processed"
-RAPTOR_OUTPUT_PATH = os.path.join(PROCESSED_DATA_DIR, "current_raptor.csv")
-
-# Offensive Weights (Estimated RAPTOR Box Prior)
-OFF_WEIGHTS = {
-    'intercept': -3.88704,
-    'MPG': 0.026112,
-    'PTS': 0.662784,
-    'TSA': -0.51622,
-    'AST': 0.430454,
-    'TOV': -0.893465,
-    'ORB': 0.303023,
-    'DRB': -0.085637,
-    'STL': 0.418092,
-    'BLK': -0.230734,
-    'PF': -0.108369
-}
-
-# Defensive Weights (Estimated RAPTOR Box Prior)
-DEF_WEIGHTS = {
-    'intercept': -3.079144,
-    'MPG': 0.033637,
-    'PTS': -0.081412,
-    'TSA': 0.025422,
-    'AST': -0.025109,
-    'TOV': -0.055809,
-    'ORB': -0.099034,
-    'DRB': 0.191569,
-    'STL': 1.150891,
-    'BLK': 0.611107,
-    'PF': 0.010649
-}
+RAPTOR_OUTPUT_PATH = str(RAPTOR_PATH)
 
 def fetch_player_stats():
     """
@@ -64,43 +36,21 @@ def fetch_player_stats():
     try:
         # Helper to fetch a specific type
         def get_phase_stats(phase):
-            max_retries = 3
-            p100 = pd.DataFrame()
-            pg = pd.DataFrame()
-
-            for attempt in range(max_retries):
-                try:
-                    time.sleep(2) # Rate limit protection
-                    p100 = leaguedashplayerstats.LeagueDashPlayerStats(
-                        per_mode_detailed='Per100Possessions',
-                        season=season,
-                        season_type_all_star=phase,
-                        timeout=30
-                    ).get_data_frames()[0]
-                    break
-                except (ConnectionError, ReadTimeout) as e:
-                    print(f"⚠️ NBA API hung up (p100)! Retrying {attempt + 1}/{max_retries} in 5 seconds...")
-                    time.sleep(5)
-                except Exception as e:
-                    print(f"An unexpected error occurred: {e}")
-                    break
+            p100 = nba_api_call(
+                leaguedashplayerstats.LeagueDashPlayerStats,
+                df_index=0,
+                per_mode_detailed='Per100Possessions',
+                season=season,
+                season_type_all_star=phase
+            )
             
-            for attempt in range(max_retries):
-                try:
-                    time.sleep(1) 
-                    pg = leaguedashplayerstats.LeagueDashPlayerStats(
-                        per_mode_detailed='PerGame',
-                        season=season,
-                        season_type_all_star=phase,
-                        timeout=30
-                    ).get_data_frames()[0]
-                    break
-                except (ConnectionError, ReadTimeout) as e:
-                    print(f"⚠️ NBA API hung up (pg)! Retrying {attempt + 1}/{max_retries} in 5 seconds...")
-                    time.sleep(5)
-                except Exception as e:
-                    print(f"An unexpected error occurred: {e}")
-                    break
+            pg = nba_api_call(
+                leaguedashplayerstats.LeagueDashPlayerStats,
+                df_index=0,
+                per_mode_detailed='PerGame',
+                season=season,
+                season_type_all_star=phase
+            )
             
             if p100.empty or pg.empty:
                 return pd.DataFrame()
@@ -172,32 +122,32 @@ def calculate_estimated_raptor(df):
     
     # Offensive RAPTOR
     df['RAPTOR_OFF'] = (
-        OFF_WEIGHTS['intercept'] +
-        OFF_WEIGHTS['MPG'] * df['MPG'] +
-        OFF_WEIGHTS['PTS'] * df['PTS'] +
-        OFF_WEIGHTS['TSA'] * df['TSA'] +
-        OFF_WEIGHTS['AST'] * df['AST'] +
-        OFF_WEIGHTS['TOV'] * df['TOV'] +
-        OFF_WEIGHTS['ORB'] * df['OREB'] +
-        OFF_WEIGHTS['DRB'] * df['DREB'] +
-        OFF_WEIGHTS['STL'] * df['STL'] +
-        OFF_WEIGHTS['BLK'] * df['BLK'] +
-        OFF_WEIGHTS['PF']  * df['PF']
+        RAPTOR_OFF_WEIGHTS['intercept'] +
+        RAPTOR_OFF_WEIGHTS['MPG'] * df['MPG'] +
+        RAPTOR_OFF_WEIGHTS['PTS'] * df['PTS'] +
+        RAPTOR_OFF_WEIGHTS['TSA'] * df['TSA'] +
+        RAPTOR_OFF_WEIGHTS['AST'] * df['AST'] +
+        RAPTOR_OFF_WEIGHTS['TOV'] * df['TOV'] +
+        RAPTOR_OFF_WEIGHTS['ORB'] * df['OREB'] +
+        RAPTOR_OFF_WEIGHTS['DRB'] * df['DREB'] +
+        RAPTOR_OFF_WEIGHTS['STL'] * df['STL'] +
+        RAPTOR_OFF_WEIGHTS['BLK'] * df['BLK'] +
+        RAPTOR_OFF_WEIGHTS['PF']  * df['PF']
     )
     
     # Defensive RAPTOR
     df['RAPTOR_DEF'] = (
-        DEF_WEIGHTS['intercept'] +
-        DEF_WEIGHTS['MPG'] * df['MPG'] +
-        DEF_WEIGHTS['PTS'] * df['PTS'] +
-        DEF_WEIGHTS['TSA'] * df['TSA'] +
-        DEF_WEIGHTS['AST'] * df['AST'] +
-        DEF_WEIGHTS['TOV'] * df['TOV'] +
-        DEF_WEIGHTS['ORB'] * df['OREB'] +
-        DEF_WEIGHTS['DRB'] * df['DREB'] +
-        DEF_WEIGHTS['STL'] * df['STL'] +
-        DEF_WEIGHTS['BLK'] * df['BLK'] +
-        DEF_WEIGHTS['PF']  * df['PF']
+        RAPTOR_DEF_WEIGHTS['intercept'] +
+        RAPTOR_DEF_WEIGHTS['MPG'] * df['MPG'] +
+        RAPTOR_DEF_WEIGHTS['PTS'] * df['PTS'] +
+        RAPTOR_DEF_WEIGHTS['TSA'] * df['TSA'] +
+        RAPTOR_DEF_WEIGHTS['AST'] * df['AST'] +
+        RAPTOR_DEF_WEIGHTS['TOV'] * df['TOV'] +
+        RAPTOR_DEF_WEIGHTS['ORB'] * df['OREB'] +
+        RAPTOR_DEF_WEIGHTS['DRB'] * df['DREB'] +
+        RAPTOR_DEF_WEIGHTS['STL'] * df['STL'] +
+        RAPTOR_DEF_WEIGHTS['BLK'] * df['BLK'] +
+        RAPTOR_DEF_WEIGHTS['PF']  * df['PF']
     )
     
     # Positional Adjustments (Default to SF 0/0 for V1)
@@ -215,7 +165,7 @@ def run_raptor_pipeline():
     """
     Orchestrates the RAPTOR calculation and export.
     """
-    os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(RAPTOR_OUTPUT_PATH), exist_ok=True)
     
     df = fetch_player_stats()
     if not df.empty:

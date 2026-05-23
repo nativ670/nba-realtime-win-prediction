@@ -1,25 +1,30 @@
 import pandas as pd
 import time
 import os
+import sys
 from nba_api.stats.endpoints import leaguegamefinder
 from nba_api.stats.library.parameters import SeasonTypeAllStar
-from requests.exceptions import ReadTimeout, ConnectionError
+
+# --- Path Injection ---
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from src.config import get_current_season_year, RAW_DIR, NBA_API_SLEEP
+from src.utils.nba_client import nba_api_call
 
 # ==============================================================================
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
 
-# Align with 10-year window
-CURRENT_YEAR = 2024
+# Dynamically compute the season range — no more hardcoded year!
+CURRENT_YEAR = get_current_season_year()
 START_YEAR = CURRENT_YEAR - 10
 SEASONS = [f"{year}-{str(year+1)[2:]}" for year in range(START_YEAR, CURRENT_YEAR + 1)]
 
-RAW_DATA_DIR = "data/raw"
+RAW_DATA_DIR = str(RAW_DIR)
 BOX_FILE_PATH = os.path.join(RAW_DATA_DIR, "nba_box_scores_10y.parquet")
 
 # API Request Settings
-REQUEST_DELAY = 0.6 
-MAX_RETRIES = 3
+REQUEST_DELAY = NBA_API_SLEEP
 
 # ==============================================================================
 # DATA INGESTION FUNCTIONS
@@ -27,7 +32,8 @@ MAX_RETRIES = 3
 
 def fetch_box_scores(seasons):
     """
-    Retrieves box scores (game results) for the specified seasons with retry logic.
+    Retrieves box scores (game results) for the specified seasons.
+    Uses shared nba_client for retry logic.
     """
     all_games = []
     season_types = [SeasonTypeAllStar.regular, SeasonTypeAllStar.playoffs]
@@ -36,29 +42,19 @@ def fetch_box_scores(seasons):
     
     for season in seasons:
         for s_type in season_types:
-            for attempt in range(MAX_RETRIES):
-                try:
-                    time.sleep(REQUEST_DELAY)
-                    game_finder = leaguegamefinder.LeagueGameFinder(
-                        season_nullable=season,
-                        league_id_nullable='00', # NBA
-                        season_type_nullable=s_type,
-                        timeout=30
-                    )
-                    games = game_finder.get_data_frames()[0]
-                    
-                    # Basic cleaning: add season year for easier filtering later
-                    games['season'] = int(season[:4])
-                    
-                    all_games.append(games)
-                    print(f"  - {season} ({s_type}): Found {len(games)} team-game rows")
-                    break
-                except (ReadTimeout, ConnectionError) as e:
-                    print(f"  - ⚠️ Timeout for {season} {s_type}! Retrying {attempt+1}/{MAX_RETRIES} in 5s...")
-                    time.sleep(5)
-                except Exception as e:
-                    print(f"  - Error fetching box scores for {season} {s_type}: {e}")
-                    break
+            games = nba_api_call(
+                leaguegamefinder.LeagueGameFinder,
+                season_nullable=season,
+                league_id_nullable='00',
+                season_type_nullable=s_type
+            )
+            if not games.empty:
+                # Add season year for easier filtering later
+                games['season'] = int(season[:4])
+                all_games.append(games)
+                print(f"  - {season} ({s_type}): Found {len(games)} team-game rows")
+            else:
+                print(f"  - {season} ({s_type}): No data or API error")
                 
     if not all_games:
         return pd.DataFrame()

@@ -1,34 +1,81 @@
+# ============================================================
+# Daily NBA Data Update Workflow
+# ============================================================
+# Runs every morning at 10:00 AM UTC (7:00 AM ET) to update:
+#   - Team Elo ratings (live_elo.csv)
+#   - Player RAPTOR ratings (current_raptor.csv)
+#   - Play-by-play season parquets (seasons/*.parquet)
+#
+# Uses a minimal CI requirements file to keep installs fast.
+# Commits only the data files that actually changed.
+# ============================================================
+
 name: Daily NBA Data Update
-on:  
-  schedule:    
-    - cron: '0 6 * * *' # Runs daily at 6:00 AM UTC  
-  workflow_dispatch: # Allows manual triggering
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+on:
+  schedule:
+    # 10:00 AM UTC = 7:00 AM ET — safe margin after West Coast games
+    - cron: '0 10 * * *'
+  workflow_dispatch: # Allows manual triggering from the Actions tab
 
-jobs:  
-  update-nba-data:    
-    runs-on: ubuntu-latest        
-    steps:    
-    - name: Checkout repository      
-      uses: actions/checkout@v4    
-    - name: Set up Python      
-      uses: actions/setup-python@v5      
-      with:        
-        python-version: '3.12.1'    
-    - name: Install dependencies      
-      run: |        
-        python -m pip install --upgrade pip        
-        pip install pandas numpy nba_api requests pyarrow    
+jobs:
+  update-nba-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # Kill runaway jobs after 15 minutes
 
-    - name: Run Daily Update Pipeline
-      run: python src/data_ingestion/daily_update.py
+    steps:
+      # ----------------------------------------------------------
+      # 1. Checkout the repo so we can read/write data files
+      # ----------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Commit and push changes      
-      run: |        
-        git config --global user.name "github-actions[bot]"        
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"        
-        git add data/processed/live_elo.csv data/processed/current_raptor.csv data/processed/seasons/*.parquet        
-        git commit -m "data: auto-update team elo, player raptor, and pbp data [skip ci]" || echo "No changes to commit"        
-        git push origin main
+      # ----------------------------------------------------------
+      # 2. Set up Python with pip caching for faster installs
+      # ----------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements-ci.txt
+
+      # ----------------------------------------------------------
+      # 3. Install only the minimal CI dependencies
+      # ----------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      # ----------------------------------------------------------
+      # 4. Run the daily update pipeline
+      #    set -e ensures the step fails immediately on any error
+      # ----------------------------------------------------------
+      - name: Run Daily Update Pipeline
+        continue-on-error: false
+        run: |
+          set -e
+          python src/data_ingestion/daily_update.py
+
+      # ----------------------------------------------------------
+      # 5. Commit & push only the data files that actually changed
+      #    The `git diff --quiet` check prevents empty commits
+      # ----------------------------------------------------------
+      - name: Commit and push changes
+        run: |
+          set -e
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage only the expected output files
+          git add data/processed/live_elo.csv \
+                  data/processed/current_raptor.csv \
+                  data/processed/seasons/*.parquet
+
+          # Commit only if there are staged changes
+          git diff --cached --quiet \
+            && echo "No changes to commit" \
+            || git commit -m "data: auto-update team elo, player raptor, and pbp data [skip ci]"
+
+          git push origin main

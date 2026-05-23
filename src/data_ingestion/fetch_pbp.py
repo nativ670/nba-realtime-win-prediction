@@ -1,26 +1,30 @@
 import pandas as pd
 import time
 import os
+import sys
 from nba_api.stats.endpoints import leaguegamefinder, playbyplayv3
 from nba_api.stats.library.parameters import SeasonTypeAllStar
-from requests.exceptions import ReadTimeout, ConnectionError
+
+# --- Path Injection ---
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from src.config import get_current_season_year, RAW_DIR, NBA_API_SLEEP
+from src.utils.nba_client import nba_api_call
 
 # ==============================================================================
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
 
-# Fetch last 10 years of data
-CURRENT_YEAR = 2024 # Adjust based on current season context
+# Dynamically compute the season range — no more hardcoded year!
+CURRENT_YEAR = get_current_season_year()
 START_YEAR = CURRENT_YEAR - 10
 SEASONS = [f"{year}-{str(year+1)[2:]}" for year in range(START_YEAR, CURRENT_YEAR + 1)]
 
-RAW_DATA_DIR = "data/raw"
+RAW_DATA_DIR = str(RAW_DIR)
 PBP_FILE_PATH = os.path.join(RAW_DATA_DIR, "nba_pbp_10y.parquet")
-LOG_FILE_PATH = os.path.join(RAW_DATA_DIR, "pbp_fetch_progress.log")
 
 # API Request Settings
-REQUEST_DELAY = 0.6  # Seconds to wait between requests to avoid rate limits
-MAX_RETRIES = 3
+REQUEST_DELAY = NBA_API_SLEEP
 
 # ==============================================================================
 # DATA INGESTION FUNCTIONS
@@ -28,7 +32,8 @@ MAX_RETRIES = 3
 
 def get_game_ids(seasons):
     """
-    Retrieves all regular season and playoff game IDs for a list of seasons with retry logic.
+    Retrieves all regular season and playoff game IDs for a list of seasons.
+    Uses shared nba_client for retry logic.
     """
     all_games = []
     season_types = [SeasonTypeAllStar.regular, SeasonTypeAllStar.playoffs]
@@ -36,26 +41,17 @@ def get_game_ids(seasons):
     
     for season in seasons:
         for s_type in season_types:
-            for attempt in range(MAX_RETRIES):
-                try:
-                    time.sleep(REQUEST_DELAY) # Rate limiting
-                    # Query LeagueGameFinder for NBA games
-                    game_finder = leaguegamefinder.LeagueGameFinder(
-                        season_nullable=season,
-                        league_id_nullable='00', # NBA
-                        season_type_nullable=s_type,
-                        timeout=30
-                    )
-                    games = game_finder.get_data_frames()[0]
-                    all_games.append(games)
-                    print(f"  - {season} ({s_type}): Found {len(games)} games")
-                    break
-                except (ReadTimeout, ConnectionError) as e:
-                    print(f"  - ⚠️ Timeout for {season} {s_type}! Retrying {attempt+1}/{MAX_RETRIES}...")
-                    time.sleep(5)
-                except Exception as e:
-                    print(f"  - Error fetching IDs for {season} {s_type}: {e}")
-                    break
+            games = nba_api_call(
+                leaguegamefinder.LeagueGameFinder,
+                season_nullable=season,
+                league_id_nullable='00',
+                season_type_nullable=s_type
+            )
+            if not games.empty:
+                all_games.append(games)
+                print(f"  - {season} ({s_type}): Found {len(games)} games")
+            else:
+                print(f"  - {season} ({s_type}): No games found or API error")
             
     if not all_games:
         return []
@@ -65,21 +61,13 @@ def get_game_ids(seasons):
 
 def fetch_pbp_for_game(game_id):
     """
-    Fetches play-by-play data for a single game ID with retry logic.
+    Fetches play-by-play data for a single game ID.
+    Uses shared nba_client for retry logic.
     """
-    for attempt in range(MAX_RETRIES):
-        try:
-            pbp = playbyplayv3.PlayByPlayV3(game_id=game_id, timeout=30)
-            return pbp.get_data_frames()[0]
-        except (ReadTimeout, ConnectionError) as e:
-            wait_time = (attempt + 1) * 5
-            print(f"    [!] Timeout for Game {game_id} (Attempt {attempt+1}/{MAX_RETRIES}). Waiting {wait_time}s...")
-            time.sleep(wait_time)
-        except Exception as e:
-            print(f"    [!] Error for Game {game_id}: {e}")
-            break
-            
-    return pd.DataFrame()
+    return nba_api_call(
+        playbyplayv3.PlayByPlayV3,
+        game_id=game_id
+    )
 
 def run_ingestion(limit_games=None):
     """

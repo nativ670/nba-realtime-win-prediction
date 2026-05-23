@@ -1,16 +1,22 @@
 import pandas as pd
 import io
 import requests
+import os
+import sys
+
+# --- Path Injection ---
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from src.config import ELO_SOURCE_URL
 
 def fetch_elo_data():
     """
     Downloads Neil Paine's Elo Data from GitHub.
     This dataset includes historical Elo ratings and playoff markers for NBA games.
     """
-    url = "https://raw.githubusercontent.com/Neil-Paine-1/NBA-elo/main/nba_elo.csv"
     try:
-        print(f"Downloading Elo data from {url}...")
-        response = requests.get(url)
+        print(f"Downloading Elo data from {ELO_SOURCE_URL}...")
+        response = requests.get(ELO_SOURCE_URL, timeout=30)
         response.raise_for_status()
         elo_df = pd.read_csv(io.StringIO(response.text))
         
