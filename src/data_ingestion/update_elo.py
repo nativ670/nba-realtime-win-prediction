@@ -79,15 +79,6 @@ def update_elo():
     
     if all_games.empty:
         print(f"No games found from {start_date_str} to {end_date_str}.")
-        # Advance the date by appending a dummy row to avoid re-checking empty days
-        dummy_row = pd.DataFrame([{
-            'date': yesterday, 'season': df_live['season'].max(), 'neutral': 0, 'playoff': np.nan,
-            'team1': None, 'team2': None, 'elo1_pre': np.nan, 'elo2_pre': np.nan,
-            'elo_prob1': np.nan, 'elo_prob2': np.nan, 'elo1_post': np.nan, 'elo2_post': np.nan,
-            'score1': np.nan, 'score2': np.nan, 'is_home': np.nan
-        }])
-        df_live = pd.concat([df_live, dummy_row], ignore_index=True)
-        df_live.to_csv(LIVE_ELO_PATH, index=False)
         return
 
     # Create a dictionary for O(1) Elo lookups
@@ -170,14 +161,7 @@ def update_elo():
     if new_rows:
         df_live = pd.concat([df_live, pd.DataFrame(new_rows)], ignore_index=True)
     
-    # Update max date even if no games on the very last day
-    dummy_row = pd.DataFrame([{
-        'date': yesterday, 'season': last_season, 'neutral': 0, 'playoff': np.nan,
-        'team1': None, 'team2': None, 'elo1_pre': np.nan, 'elo2_pre': np.nan,
-        'elo_prob1': np.nan, 'elo_prob2': np.nan, 'elo1_post': np.nan, 'elo2_post': np.nan,
-        'score1': np.nan, 'score2': np.nan, 'is_home': np.nan
-    }])
-    df_live = pd.concat([df_live, dummy_row], ignore_index=True)
+    # End of Elo update
     
     df_live.to_csv(LIVE_ELO_PATH, index=False)
     print(f"Elo update complete. Final date: {yesterday.strftime('%Y-%m-%d')}")

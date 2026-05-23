@@ -191,7 +191,7 @@ if __name__ == "__main__":
     df_results = run_raptor_pipeline()
     
     if not df_results.empty:
-        print("\n🏆 RAPTOR LEADERBOARD (Top 10)")
+        print("\nRAPTOR LEADERBOARD (Top 10)")
         # Sort by Total RAPTOR, minimum minutes filter for quality
         leaderboard = df_results[df_results['MIN'] > 15].sort_values('RAPTOR_TOTAL', ascending=False).head(10)
         print(leaderboard[['PLAYER_NAME', 'MIN', 'RAPTOR_OFF', 'RAPTOR_DEF', 'RAPTOR_TOTAL']].to_string(index=False))
