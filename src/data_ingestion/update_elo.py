@@ -10,6 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from nba_api.stats.endpoints import leaguegamefinder
 from src.data_ingestion.fetch_elo import fetch_elo_data
+from requests.exceptions import ReadTimeout, ConnectionError
 
 # --- Configuration ---
 LIVE_ELO_PATH = "data/processed/live_elo.csv"
@@ -64,19 +65,34 @@ def calculate_new_elos(elo1_pre, elo2_pre, score1, score2, is_home=True):
     return elo1_pre + shift, elo2_pre - shift
 
 def get_games_for_date(target_date):
-    """Fetches games played on a specific date from nba_api."""
-    try:
-        print(f"Fetching games for {target_date}...")
-        game_finder = leaguegamefinder.LeagueGameFinder(
-            date_from_nullable=target_date,
-            date_to_nullable=target_date,
-            league_id_nullable='00'
-        )
-        games = game_finder.get_data_frames()[0]
-        return games
-    except Exception as e:
-        print(f"Error fetching games for {target_date}: {e}")
-        return pd.DataFrame()
+    """Fetches games played on a specific date from nba_api with retry logic."""
+    print(f"Fetching games for {target_date}...")
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Tell the script to take a breath
+            time.sleep(2) 
+            
+            game_finder = leaguegamefinder.LeagueGameFinder(
+                date_from_nullable=target_date,
+                date_to_nullable=target_date,
+                league_id_nullable='00',
+                timeout=30
+            )
+            games = game_finder.get_data_frames()[0]
+            return games
+            
+        except (ReadTimeout, ConnectionError) as e:
+            print(f"⚠️ NBA API timed out! Retrying {attempt + 1}/{max_retries} in 10 seconds...")
+            time.sleep(10)
+            
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            break
+            
+    print(f"❌ Failed to fetch games for {target_date} after {max_retries} attempts.")
+    return pd.DataFrame()
 
 def update_elo(target_date=None):
     # 1. Load existing Elo

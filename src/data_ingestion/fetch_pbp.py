@@ -3,6 +3,7 @@ import time
 import os
 from nba_api.stats.endpoints import leaguegamefinder, playbyplayv3
 from nba_api.stats.library.parameters import SeasonTypeAllStar
+from requests.exceptions import ReadTimeout, ConnectionError
 
 # ==============================================================================
 # CONFIGURATION & CONSTANTS
@@ -27,7 +28,7 @@ MAX_RETRIES = 3
 
 def get_game_ids(seasons):
     """
-    Retrieves all regular season and playoff game IDs for a list of seasons.
+    Retrieves all regular season and playoff game IDs for a list of seasons with retry logic.
     """
     all_games = []
     season_types = [SeasonTypeAllStar.regular, SeasonTypeAllStar.playoffs]
@@ -35,19 +36,26 @@ def get_game_ids(seasons):
     
     for season in seasons:
         for s_type in season_types:
-            try:
-                # Query LeagueGameFinder for NBA games
-                game_finder = leaguegamefinder.LeagueGameFinder(
-                    season_nullable=season,
-                    league_id_nullable='00', # NBA
-                    season_type_nullable=s_type
-                )
-                games = game_finder.get_data_frames()[0]
-                all_games.append(games)
-                print(f"  - {season} ({s_type}): Found {len(games)} games")
-                time.sleep(REQUEST_DELAY) # Rate limiting
-            except Exception as e:
-                print(f"  - Error fetching IDs for {season} {s_type}: {e}")
+            for attempt in range(MAX_RETRIES):
+                try:
+                    time.sleep(REQUEST_DELAY) # Rate limiting
+                    # Query LeagueGameFinder for NBA games
+                    game_finder = leaguegamefinder.LeagueGameFinder(
+                        season_nullable=season,
+                        league_id_nullable='00', # NBA
+                        season_type_nullable=s_type,
+                        timeout=30
+                    )
+                    games = game_finder.get_data_frames()[0]
+                    all_games.append(games)
+                    print(f"  - {season} ({s_type}): Found {len(games)} games")
+                    break
+                except (ReadTimeout, ConnectionError) as e:
+                    print(f"  - ⚠️ Timeout for {season} {s_type}! Retrying {attempt+1}/{MAX_RETRIES}...")
+                    time.sleep(5)
+                except Exception as e:
+                    print(f"  - Error fetching IDs for {season} {s_type}: {e}")
+                    break
             
     if not all_games:
         return []
@@ -61,13 +69,15 @@ def fetch_pbp_for_game(game_id):
     """
     for attempt in range(MAX_RETRIES):
         try:
-            pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
+            pbp = playbyplayv3.PlayByPlayV3(game_id=game_id, timeout=30)
             return pbp.get_data_frames()[0]
-        except Exception as e:
-            wait_time = (attempt + 1) * 2
-            print(f"    [!] Error for Game {game_id} (Attempt {attempt+1}/{MAX_RETRIES}): {e}")
-            print(f"    Waiting {wait_time}s before retry...")
+        except (ReadTimeout, ConnectionError) as e:
+            wait_time = (attempt + 1) * 5
+            print(f"    [!] Timeout for Game {game_id} (Attempt {attempt+1}/{MAX_RETRIES}). Waiting {wait_time}s...")
             time.sleep(wait_time)
+        except Exception as e:
+            print(f"    [!] Error for Game {game_id}: {e}")
+            break
             
     return pd.DataFrame()
 

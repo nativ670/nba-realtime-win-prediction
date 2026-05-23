@@ -10,6 +10,8 @@ from nba_api.stats.endpoints import leaguedashplayerstats
 # Add the project root to sys.path so 'src' can be found
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from requests.exceptions import ReadTimeout, ConnectionError
+
 # --- Configuration ---
 PROCESSED_DATA_DIR = "data/processed"
 RAPTOR_OUTPUT_PATH = os.path.join(PROCESSED_DATA_DIR, "current_raptor.csv")
@@ -63,31 +65,45 @@ def fetch_player_stats():
         # Helper to fetch a specific type
         def get_phase_stats(phase):
             max_retries = 3
-            for attempt in range(max_retries):
+            p100 = pd.DataFrame()
+            pg = pd.DataFrame()
 
+            for attempt in range(max_retries):
                 try:
                     time.sleep(2) # Rate limit protection
-
                     p100 = leaguedashplayerstats.LeagueDashPlayerStats(
                         per_mode_detailed='Per100Possessions',
                         season=season,
-                        season_type_all_star=phase
-                        ).get_data_frames()[0]
-                
-                except ConnectionError as e:
-                    print(f"⚠️ NBA API hung up! Retrying {attempt + 1}/{max_retries} in 5 seconds...")
+                        season_type_all_star=phase,
+                        timeout=30
+                    ).get_data_frames()[0]
+                    break
+                except (ConnectionError, ReadTimeout) as e:
+                    print(f"⚠️ NBA API hung up (p100)! Retrying {attempt + 1}/{max_retries} in 5 seconds...")
                     time.sleep(5)
-
                 except Exception as e:
-                    # If it's a different kind of error, just print it
                     print(f"An unexpected error occurred: {e}")
                     break
-                        
-            pg = leaguedashplayerstats.LeagueDashPlayerStats(
-                per_mode_detailed='PerGame',
-                season=season,
-                season_type_all_star=phase
-            ).get_data_frames()[0]
+            
+            for attempt in range(max_retries):
+                try:
+                    time.sleep(1) 
+                    pg = leaguedashplayerstats.LeagueDashPlayerStats(
+                        per_mode_detailed='PerGame',
+                        season=season,
+                        season_type_all_star=phase,
+                        timeout=30
+                    ).get_data_frames()[0]
+                    break
+                except (ConnectionError, ReadTimeout) as e:
+                    print(f"⚠️ NBA API hung up (pg)! Retrying {attempt + 1}/{max_retries} in 5 seconds...")
+                    time.sleep(5)
+                except Exception as e:
+                    print(f"An unexpected error occurred: {e}")
+                    break
+            
+            if p100.empty or pg.empty:
+                return pd.DataFrame()
             
             # Combine Per100 and PerGame (for MPG/MIN)
             df_pg_min = pg[['PLAYER_ID', 'MIN', 'GP']].rename(columns={'MIN': 'MPG', 'GP': 'GP_PHASE'})
