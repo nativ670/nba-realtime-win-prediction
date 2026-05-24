@@ -20,9 +20,14 @@ RAPTOR_OUTPUT_PATH = str(RAPTOR_PATH)
 
 def fetch_player_stats():
     """
-    Fetches current season player stats: 
-    - Fetches both Regular Season and Playoff stats.
+    Fetches current season player stats:
+    - Fetches both Regular Season and Playoff stats (PerGame mode only — 2 API calls).
+    - Derives per-100-possession approximations from per-game stats and MPG.
     - Joins them and creates a weighted average based on total minutes.
+    
+    Optimization: Uses only PerGame mode (2 calls) instead of PerGame + Per100Possessions
+    (4 calls). Per-100 rates are approximated as: stat_per100 ≈ stat_per_game / MPG * 48.
+    This halves API calls and saves significant time on throttled CI runners.
     """
     # Determine current season
     now = datetime.now()
@@ -33,17 +38,16 @@ def fetch_player_stats():
     
     print(f"Fetching player stats for season {season} (Regular + Playoffs) from nba_api...")
     
+    # Per-100 approximation factor: 48 minutes per game / average possessions (~100)
+    # Since NBA pace ≈ 100 possessions per 48 min, per_game / MPG * 48 ≈ per_100
+    PER_100_FACTOR = 48.0
+    
+    # Stats we need in per-100 form for RAPTOR calculation
+    per100_stats = ['PTS', 'FGA', 'FTA', 'AST', 'TOV', 'OREB', 'DREB', 'STL', 'BLK', 'PF']
+    
     try:
-        # Helper to fetch a specific type
         def get_phase_stats(phase):
-            p100 = nba_api_call(
-                leaguedashplayerstats.LeagueDashPlayerStats,
-                df_index=0,
-                per_mode_detailed='Per100Possessions',
-                season=season,
-                season_type_all_star=phase
-            )
-            
+            """Fetch PerGame stats for a phase and derive per-100 approximations."""
             pg = nba_api_call(
                 leaguedashplayerstats.LeagueDashPlayerStats,
                 df_index=0,
@@ -52,15 +56,25 @@ def fetch_player_stats():
                 season_type_all_star=phase
             )
             
-            if p100.empty or pg.empty:
+            if pg.empty:
                 return pd.DataFrame()
             
-            # Combine Per100 and PerGame (for MPG/MIN)
-            df_pg_min = pg[['PLAYER_ID', 'MIN', 'GP']].rename(columns={'MIN': 'MPG', 'GP': 'GP_PHASE'})
-            # Also need total minutes to weight correctly: Total MIN = MPG * GP
-            df_pg_min['TOTAL_MIN_PHASE'] = df_pg_min['MPG'] * df_pg_min['GP_PHASE']
+            # Keep original per-game MIN as MPG
+            pg = pg.rename(columns={'MIN': 'MPG'})
             
-            return p100.merge(df_pg_min, on='PLAYER_ID', how='inner')
+            # Filter out players with 0 MPG to avoid division by zero
+            pg = pg[pg['MPG'] > 0].copy()
+            
+            # Derive per-100-possession approximations from per-game stats
+            # Formula: stat_per_100 ≈ stat_per_game / MPG * 48
+            for stat in per100_stats:
+                pg[stat] = pg[stat] / pg['MPG'] * PER_100_FACTOR
+            
+            # Calculate total minutes for weighting: MPG * GP
+            pg['GP_PHASE'] = pg['GP']
+            pg['TOTAL_MIN_PHASE'] = pg['MPG'] * pg['GP_PHASE']
+            
+            return pg
 
         df_reg = get_phase_stats('Regular Season')
         df_ply = get_phase_stats('Playoffs')
@@ -73,9 +87,7 @@ def fetch_player_stats():
         # --- Weighted Merge Logic ---
         # We want to combine them so that if a player is in both, we take the weighted average
         common_cols = ['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID']
-        stat_cols = [
-            'PTS', 'FGA', 'FTA', 'AST', 'TOV', 'OREB', 'DREB', 'STL', 'BLK', 'PF', 'MPG'
-        ]
+        stat_cols = per100_stats + ['MPG']
         
         # Merge the two sets
         df_combined = df_reg.merge(df_ply, on=common_cols, how='outer', suffixes=('_REG', '_PLY'))

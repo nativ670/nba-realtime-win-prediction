@@ -82,7 +82,7 @@ ELO_SOURCE_URL = "https://raw.githubusercontent.com/Neil-Paine-1/NBA-elo/main/nb
 
 # Rate limiting — nba_api throttles aggressively on shared IPs (e.g., GitHub Actions)
 NBA_API_SLEEP = 0.6           # Seconds between routine calls
-NBA_API_RETRY_SLEEP = 10      # Initial backoff on retry (increased for GitHub Actions)
+NBA_API_RETRY_SLEEP = 5       # Initial backoff on retry (scales: 5s, 10s, 15s)
 NBA_API_MAX_RETRIES = 3       # Max retry attempts
 NBA_API_TIMEOUT = 60          # Seconds before timeout (increased for slow endpoints)
 

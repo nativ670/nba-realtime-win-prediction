@@ -20,7 +20,19 @@ except ImportError:
     NBA_API_SLEEP = 0.6
     NBA_API_RETRY_SLEEP = 5
     NBA_API_MAX_RETRIES = 3
-    NBA_API_TIMEOUT = 30
+    NBA_API_TIMEOUT = 60
+
+# Browser-like headers to avoid throttling on shared IPs (e.g., GitHub Actions).
+# stats.nba.com aggressively rate-limits requests without a proper Referer/User-Agent.
+NBA_API_HEADERS = {
+    'Host': 'stats.nba.com',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.nba.com/',
+    'Origin': 'https://www.nba.com',
+    'Connection': 'keep-alive',
+}
 
 
 def nba_api_call(endpoint_class, df_index=0, max_retries=None,
@@ -57,7 +69,7 @@ def nba_api_call(endpoint_class, df_index=0, max_retries=None,
             # Rate limit — breathe before every call
             time.sleep(_sleep)
 
-            result = endpoint_class(**kwargs, timeout=_timeout)
+            result = endpoint_class(**kwargs, headers=NBA_API_HEADERS, timeout=_timeout)
             dfs = result.get_data_frames()
 
             if df_index < len(dfs):
@@ -104,7 +116,7 @@ def nba_api_call_multi(endpoint_class, df_indices=None,
     for attempt in range(_retries):
         try:
             time.sleep(_sleep)
-            result = endpoint_class(**kwargs, timeout=_timeout)
+            result = endpoint_class(**kwargs, headers=NBA_API_HEADERS, timeout=_timeout)
             dfs = result.get_data_frames()
 
             if df_indices is None:
