@@ -1,12 +1,10 @@
 import pandas as pd
 import numpy as np
 import os
-import sys
+
 import time
 from nba_api.stats.endpoints import leaguedashplayerstats
 
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 # --- Configuration & Weights (Reused from src.config) ---
 from src.config import RAPTOR_OFF_WEIGHTS, RAPTOR_DEF_WEIGHTS, RAW_DIR

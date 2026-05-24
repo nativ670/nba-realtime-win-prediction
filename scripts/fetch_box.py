@@ -1,12 +1,10 @@
 import pandas as pd
 import time
 import os
-import sys
+
 from nba_api.stats.endpoints import leaguegamefinder
 from nba_api.stats.library.parameters import SeasonTypeAllStar
 
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from src.config import get_current_season_year, RAW_DIR, NBA_API_SLEEP
 from src.utils.nba_client import nba_api_call
@@ -21,7 +19,8 @@ START_YEAR = CURRENT_YEAR - 10
 SEASONS = [f"{year}-{str(year+1)[2:]}" for year in range(START_YEAR, CURRENT_YEAR + 1)]
 
 RAW_DATA_DIR = str(RAW_DIR)
-BOX_FILE_PATH = os.path.join(RAW_DATA_DIR, "nba_box_scores_10y.parquet")
+from src.config import RAW_BOX_PATH
+BOX_FILE_PATH = str(RAW_BOX_PATH)
 
 # API Request Settings
 REQUEST_DELAY = NBA_API_SLEEP

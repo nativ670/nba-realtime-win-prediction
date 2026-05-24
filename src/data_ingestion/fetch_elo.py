@@ -1,11 +1,6 @@
 import pandas as pd
 import io
 import requests
-import os
-import sys
-
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from src.config import ELO_SOURCE_URL
 
@@ -24,7 +19,7 @@ def fetch_elo_data():
         elo_df['date'] = pd.to_datetime(elo_df['date'])
         
         return elo_df
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"Error fetching Elo data: {e}")
         return pd.DataFrame()
 

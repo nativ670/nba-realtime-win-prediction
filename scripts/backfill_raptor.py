@@ -1,21 +1,18 @@
 import pandas as pd
 import numpy as np
 import os
-import sys
+
 import glob
 import re
 import unicodedata
 from tqdm import tqdm
 import time
 from nba_api.stats.endpoints import leaguedashplayerstats
+from src.utils.nba_client import nba_api_call
 
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from src.config import RAW_DIR, PROCESSED_DIR, SEASONS_DIR
 
-# Configuration
-RAW_DIR = "data/raw"
-PROCESSED_DIR = "data/processed"
-SEASONS_DIR = "data/processed/seasons"
+# Paths now imported from config
 
 def normalize_name(name):
     """Normalizes names by removing diacritics and converting to lowercase."""
@@ -70,11 +67,13 @@ def get_season_player_map(season_str):
     """Fetches all players for a season to help resolve PBP names to full names."""
     print(f"Fetching player resolution map for {season_str}...")
     try:
-        stats = leaguedashplayerstats.LeagueDashPlayerStats(
+        stats = nba_api_call(
+            leaguedashplayerstats.LeagueDashPlayerStats,
+            df_index=0,
             per_mode_detailed='PerGame',
             season=season_str,
             season_type_all_star='Regular Season'
-        ).get_data_frames()[0]
+        )
         
         # Map (Normalized Family Name, TeamID) -> Full Name
         # This helps resolve PBP "Horford" to "Al Horford"

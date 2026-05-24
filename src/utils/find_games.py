@@ -5,9 +5,7 @@ import sys
 import os
 import argparse
 
-# Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
+from src.utils.nba_client import nba_api_call
 def find_games(target_date=None):
     """
     Fetches NBA games for a specific date and prints their Game IDs, matchups, and status.
@@ -19,9 +17,8 @@ def find_games(target_date=None):
         print(f"[*] Fetching NBA games for {target_date}...")
         
         # Query ScoreboardV3
-        sb = scoreboardv3.ScoreboardV3(game_date=target_date)
-        df_games = sb.get_data_frames()[1] # Scoreboard
-        df_teams = sb.get_data_frames()[2] # TeamScoreboard
+        df_games = nba_api_call(scoreboardv3.ScoreboardV3, df_index=1, game_date=target_date)
+        df_teams = nba_api_call(scoreboardv3.ScoreboardV3, df_index=2, game_date=target_date)
         
         if df_games.empty:
             print(f"[?] No games found for {target_date}.")

@@ -3,10 +3,6 @@ import numpy as np
 import os
 import sys
 
-# Add the project root to sys.path so 'src' can be found when running directly
-root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if root_path not in sys.path:
-    sys.path.append(root_path)
 
 from src.features.in_game import calculate_in_game_features
 from src.features.pregame import calculate_pregame_features, add_external_features
@@ -17,9 +13,10 @@ from src.utils.helpers import standardize_pbp_v3
 # PIPELINE CONFIGURATION
 # ==============================================================================
 
-RAW_PBP_PATH = "data/raw/nba_pbp_10y.parquet"
-RAW_BOX_PATH = "data/raw/nba_box_scores_10y.parquet"
-PROCESSED_DATA_PATH = "data/processed/training_data.parquet"
+from src.config import RAW_PBP_PATH, RAW_BOX_PATH, PROCESSED_DIR
+RAW_PBP_PATH = str(RAW_PBP_PATH)
+RAW_BOX_PATH = str(RAW_BOX_PATH)
+PROCESSED_DATA_PATH = str(PROCESSED_DIR / "training_data.parquet")
 # ==============================================================================
 # DATASET BUILDER ENGINE
 # ==============================================================================

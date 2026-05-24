@@ -4,16 +4,14 @@ import os
 import sys
 from tqdm import tqdm
 
-# Add the project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from src.features.in_game import calculate_in_game_features
 from src.data_ingestion.update_pbp import _compute_rest_days, _compute_travel_distance, _get_home_away_abbrevs
 from src.utils.nba_client import nba_api_call
 from nba_api.stats.endpoints import leaguegamefinder
 
-SEASONS_DIR = "data/processed/seasons"
-
+from src.config import SEASONS_DIR
+SEASONS_DIR = str(SEASONS_DIR)
 def get_full_season_schedule(season_year_str):
     """
     Fetches the full season schedule using LeagueGameFinder.

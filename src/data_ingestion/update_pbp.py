@@ -10,14 +10,9 @@ Flow:  get_games_for_range → update_pbp → process each game → save
 
 import pandas as pd
 import numpy as np
-import os
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from nba_api.stats.endpoints import leaguegamefinder, playbyplayv3
-
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 # --- Project Imports (shared utilities, no duplication) ---
 from src.config import (

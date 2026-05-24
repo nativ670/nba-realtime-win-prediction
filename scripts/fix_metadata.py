@@ -6,14 +6,14 @@ import glob
 from nba_api.stats.endpoints import leaguegamefinder
 from tqdm import tqdm
 
-# Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from src.features.pregame import calculate_pregame_features, add_external_features
 from src.utils.helpers import ELO_TEAM_MAP
 
-LIVE_ELO_PATH = "data/processed/live_elo.csv"
-SEASONS_DIR = "data/processed/seasons"
+from src.config import LIVE_ELO_PATH, SEASONS_DIR
+from src.utils.nba_client import nba_api_call
+LIVE_ELO_PATH = str(LIVE_ELO_PATH)
+SEASONS_DIR = str(SEASONS_DIR)
 
 def fix_file_metadata(file_path):
     if not os.path.exists(file_path):
@@ -39,11 +39,12 @@ def fix_file_metadata(file_path):
     # 2. Fetch Box Scores for the season
     print(f"  Fetching {season_str} box scores from NBA API...")
     try:
-        game_finder = leaguegamefinder.LeagueGameFinder(
+        df_box_raw = nba_api_call(
+            leaguegamefinder.LeagueGameFinder,
+            df_index=0,
             season_nullable=season_str,
             league_id_nullable='00'
         )
-        df_box_raw = game_finder.get_data_frames()[0]
         print(f"  Found {len(df_box_raw)} team-game rows.")
     except Exception as e:
         print(f"  ❌ Error fetching box scores: {e}")

@@ -23,8 +23,9 @@ def build_lstm_sequences():
     Iterates through seasonal parquet files, groups by game, and creates
     3D sequences using a sliding window approach.
     """
-    data_dir = 'data/processed/seasons/'
-    output_dir = 'data/processed/'
+    from src.config import SEASONS_DIR, PROCESSED_DIR
+    data_dir = str(SEASONS_DIR)
+    output_dir = str(PROCESSED_DIR)
     
     # Efficiently find all partitioned season files
     files = sorted(glob.glob(os.path.join(data_dir, 'pbp_*.parquet')))

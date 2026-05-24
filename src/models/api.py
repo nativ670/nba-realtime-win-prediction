@@ -4,26 +4,14 @@ import xgboost as xgb
 import pandas as pd
 import numpy as np
 import uvicorn
-import os
 import tensorflow as tf
 from tensorflow.keras.models import load_model as load_keras_model
 from typing import List
 
-# Define the features in the exact order they were trained
-FEATURES = [
-    'score_differential', 
-    'seconds_remaining_in_game', 
-    'possession_team_id', 
-    'elo_advantage', 
-    'rest_advantage', 
-    'distance_traveled',
-    'momentum_differential', 
-    'home_timeouts_remaining', 
-    'away_timeouts_remaining', 
-    'home_in_bonus', 
-    'away_in_bonus',
-    'live_raptor_advantage'
-]
+from src.config import (
+    MODEL_FEATURES, XGB_MODEL_PATH, LSTM_MODEL_PATH,
+    XGB_WEIGHT, LSTM_WEIGHT, LSTM_SEQUENCE_LENGTH
+)
 
 # Pydantic model for individual game state
 class GameFeatureList(BaseModel):
@@ -76,22 +64,22 @@ app = FastAPI(title="NBA Real-Time Win Probability API - The Blender")
 def load_models():
     """Loads both XGBoost and LSTM models on application startup."""
     global xgb_model, lstm_model
-    xgb_path = os.path.join("src", "models", "xgb_v3_10man.json")
-    lstm_path = os.path.join("src", "models", "lstm_v3_10man.keras")
+    xgb_path = XGB_MODEL_PATH
+    lstm_path = LSTM_MODEL_PATH
     
     # Load XGBoost
-    if not os.path.exists(xgb_path):
+    if not xgb_path.exists():
         print(f"Warning: XGBoost model not found at {xgb_path}")
     else:
         xgb_model = xgb.XGBClassifier()
-        xgb_model.load_model(xgb_path)
+        xgb_model.load_model(str(xgb_path))
         print(f"XGBoost model loaded successfully from {xgb_path}")
     
     # Load LSTM
-    if not os.path.exists(lstm_path):
+    if not lstm_path.exists():
         print(f"Warning: LSTM model not found at {lstm_path}")
     else:
-        lstm_model = load_keras_model(lstm_path)
+        lstm_model = load_keras_model(str(lstm_path))
         print(f"LSTM model loaded successfully from {lstm_path}")
 
 @app.get("/")
@@ -115,7 +103,7 @@ async def predict_win_prob(payload: EnsemblePayload):
         raw_sequence = [item.dict() for item in payload.sequence]
         
         # Create a DataFrame for feature extraction and consistency
-        df_seq = pd.DataFrame(raw_sequence)[FEATURES]
+        df_seq = pd.DataFrame(raw_sequence)[MODEL_FEATURES]
         
         # --- 2. XGBOOST PREDICTION ---
         # XGBoost expects the most recent state (last item in sequence)
@@ -128,24 +116,24 @@ async def predict_win_prob(payload: EnsemblePayload):
         # Convert sequence to numpy array
         seq_array = df_seq.values
         
-        # Handle padding if sequence length < 15
-        if len(seq_array) < 15:
-            padding_len = 15 - len(seq_array)
+        # Handle padding if sequence length < LSTM_SEQUENCE_LENGTH
+        if len(seq_array) < LSTM_SEQUENCE_LENGTH:
+            padding_len = LSTM_SEQUENCE_LENGTH - len(seq_array)
             # Pad the beginning with copies of the first play (or zeros, but first play is often more representative)
             padding = np.repeat(seq_array[0:1], padding_len, axis=0)
             seq_array = np.vstack([padding, seq_array])
-        elif len(seq_array) > 15:
-            # Should not happen due to Pydantic max_items=15, but for safety:
-            seq_array = seq_array[-15:]
+        elif len(seq_array) > LSTM_SEQUENCE_LENGTH:
+            # Should not happen due to Pydantic max_items validation, but for safety:
+            seq_array = seq_array[-LSTM_SEQUENCE_LENGTH:]
             
-        # Reshape for LSTM: (1, 15, feature_count)
-        lstm_input = seq_array.reshape(1, 15, len(FEATURES))
+        # Reshape for LSTM: (1, LSTM_SEQUENCE_LENGTH, feature_count)
+        lstm_input = seq_array.reshape(1, LSTM_SEQUENCE_LENGTH, len(MODEL_FEATURES))
         lstm_probs = lstm_model.predict(lstm_input, verbose=0)
         lstm_prob = float(lstm_probs[0][0])
         
         # --- 4. THE BLEND (Weighted Average) ---
-        # XGBoost: 70%, LSTM: 30%
-        final_win_probability = (0.70 * xgb_prob) + (0.30 * lstm_prob)
+        # XGBoost: {XGB_WEIGHT*100}%, LSTM: {LSTM_WEIGHT*100}%
+        final_win_probability = (XGB_WEIGHT * xgb_prob) + (LSTM_WEIGHT * lstm_prob)
         
         return {
             "xgb_prob": round(xgb_prob, 4),

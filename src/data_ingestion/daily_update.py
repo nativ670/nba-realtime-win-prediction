@@ -1,10 +1,5 @@
-import os
 import sys
 import time
-from pathlib import Path
-
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from src.data_ingestion.update_elo import update_elo
 from src.data_ingestion.update_pbp import update_pbp
@@ -30,6 +25,7 @@ def run_daily_update():
         sys.exit(1)
 
     # 2. Update Play-by-Play Data
+    has_failure = False
     print("\n[Step 2/3] Updating Play-by-Play Data...")
     start_time_pbp = time.time()
     try:
@@ -39,6 +35,7 @@ def run_daily_update():
         print(f"❌ Error updating PBP: {e}")
         import traceback
         traceback.print_exc()
+        has_failure = True
 
     # 3. Update Player RAPTOR Ratings
     print("\n[Step 3/3] Updating Player RAPTOR Ratings...")
@@ -50,8 +47,12 @@ def run_daily_update():
         print(f"❌ Error updating RAPTOR: {e}")
         import traceback
         traceback.print_exc()
+        has_failure = True
 
     duration = (time.time() - start_time_total) / 60
+    if has_failure:
+        print(f"\n⚠️ Daily update finished with errors. Total time: {duration:.2f} minutes.")
+        sys.exit(1)
     print(f"\n✅ Daily update complete! Total time: {duration:.2f} minutes.")
 
 if __name__ == "__main__":

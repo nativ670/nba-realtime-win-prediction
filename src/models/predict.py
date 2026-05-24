@@ -4,24 +4,7 @@ import xgboost as xgb
 import os
 import time
 
-# Feature list must EXACTLY match the order used in train.py
-FEATURES = [
-    'score_differential', 
-    'seconds_remaining_in_game', 
-    'possession_team_id', 
-    'elo_advantage', 
-    'rest_advantage', 
-    'distance_traveled',
-    'momentum_differential', 
-    'home_timeouts_remaining', 
-    'away_timeouts_remaining', 
-    'home_in_bonus', 
-    'away_in_bonus',
-    'live_raptor_advantage'
-]
-
-MODEL_PATH = 'src/models/xgb_v3_10man.json'
-SEASONS_DIR = 'data/processed/seasons'
+from src.config import MODEL_FEATURES as FEATURES, XGB_MODEL_PATH as MODEL_PATH, SEASONS_DIR
 
 def load_inference_model(model_path):
     """Loads the trained XGBoost model for prediction."""
@@ -30,7 +13,7 @@ def load_inference_model(model_path):
     
     print(f"Loading model from {model_path}...")
     model = xgb.XGBClassifier()
-    model.load_model(model_path)
+    model.load_model(str(model_path))
     return model
 
 def run_live_simulator(game_id, delay=0.1):
@@ -101,3 +84,5 @@ if __name__ == "__main__":
         run_live_simulator(TEST_GAME_ID, delay=0.05)
     except Exception as e:
         print(f"Error during simulation: {e}")
+        import sys
+        sys.exit(1)

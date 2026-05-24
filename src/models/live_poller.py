@@ -24,10 +24,7 @@ import sys
 from collections import deque
 from nba_api.stats.endpoints import playbyplayv3
 
-# Add the project root to sys.path so 'src' can be found when running directly
-root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if root_path not in sys.path:
-    sys.path.append(root_path)
+
 
 from src.config import MODEL_FEATURES, LSTM_SEQUENCE_LENGTH
 from src.utils.nba_client import nba_api_call

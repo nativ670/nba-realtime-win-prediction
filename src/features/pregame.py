@@ -1,13 +1,6 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import os
-import sys
-
-# Add the project root to sys.path so 'src' can be found when running directly
-root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if root_path not in sys.path:
-    sys.path.append(root_path)
 
 # Import constants and fetcher from project structure
 from src.utils.helpers import TEAM_COORDS, TEAM_ABBREV_MAP, ELO_TEAM_MAP

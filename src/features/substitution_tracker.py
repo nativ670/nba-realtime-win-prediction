@@ -1,16 +1,13 @@
 import pandas as pd
 import numpy as np
 import os
-import sys
 import re
 import unicodedata
 from nba_api.stats.endpoints import playbyplayv3, boxscoretraditionalv3, boxscoresummaryv3
+from requests.exceptions import ReadTimeout, ConnectionError
 
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
-# Configuration
-RAPTOR_CSV_PATH = "data/processed/current_raptor.csv"
+from src.config import RAPTOR_PATH
+from src.utils.nba_client import nba_api_call
 
 def normalize_name(name):
     """Normalizes names by removing diacritics and converting to lowercase."""
@@ -25,11 +22,11 @@ def load_raptor_dict():
     """
     Loads RAPTOR data from CSV and returns a dictionary mapping PLAYER_ID to RAPTOR_TOTAL.
     """
-    if not os.path.exists(RAPTOR_CSV_PATH):
-        print(f"Warning: {RAPTOR_CSV_PATH} not found. Using empty dictionary.")
+    if not RAPTOR_PATH.exists():
+        print(f"Warning: {RAPTOR_PATH} not found. Using empty dictionary.")
         return {}
     
-    df = pd.read_csv(RAPTOR_CSV_PATH)
+    df = pd.read_csv(RAPTOR_PATH)
     # Map ID to Total RAPTOR
     raptor_dict = df.set_index('PLAYER_ID')['RAPTOR_TOTAL'].to_dict()
     return raptor_dict
@@ -50,13 +47,11 @@ class SubstitutionTracker:
     def _initialize_metadata(self):
         """Fetches metadata and starters for the game."""
         try:
-            summary = boxscoresummaryv3.BoxScoreSummaryV3(game_id=self.game_id)
-            summary_df = summary.get_data_frames()[0]
+            summary_df = nba_api_call(boxscoresummaryv3.BoxScoreSummaryV3, df_index=0, game_id=self.game_id)
             self.home_team_id = summary_df.iloc[0]['homeTeamId']
             self.away_team_id = summary_df.iloc[0]['awayTeamId']
 
-            box = boxscoretraditionalv3.BoxScoreTraditionalV3(game_id=self.game_id)
-            box_df = box.get_data_frames()[0]
+            box_df = nba_api_call(boxscoretraditionalv3.BoxScoreTraditionalV3, df_index=0, game_id=self.game_id)
 
             for _, row in box_df.iterrows():
                 pid = row['personId']
@@ -74,8 +69,10 @@ class SubstitutionTracker:
                         self.away_on_floor.add(pid)
             
             self.initialized = True
+        except (ReadTimeout, ConnectionError) as e:
+            print(f"Network error initializing SubstitutionTracker: {e}")
         except Exception as e:
-            print(f"Error initializing SubstitutionTracker: {e}")
+            print(f"Unexpected error initializing SubstitutionTracker: {e}")
 
     def process_pbp(self, pbp_df):
         """Processes a PBP DataFrame and adds the live_raptor_advantage column."""
@@ -135,8 +132,7 @@ class SubstitutionTracker:
 
 def calculate_live_floor_advantage(game_id):
     """Legacy wrapper for the new Tracker class."""
-    pbp = playbyplayv3.PlayByPlayV3(game_id=game_id)
-    pbp_df = pbp.get_data_frames()[0]
+    pbp_df = nba_api_call(playbyplayv3.PlayByPlayV3, df_index=0, game_id=game_id)
     tracker = SubstitutionTracker(game_id)
     return tracker.process_pbp(pbp_df)
 

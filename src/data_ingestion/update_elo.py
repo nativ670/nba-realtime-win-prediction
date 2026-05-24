@@ -2,11 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 import time
-import sys
 from datetime import datetime, timedelta
-
-# --- Path Injection ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from nba_api.stats.endpoints import leaguegamefinder
 from src.config import (

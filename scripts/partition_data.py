@@ -3,8 +3,9 @@ import os
 import shutil
 
 # --- Configuration ---
-RAW_FILE = "data/processed/training_data.parquet"
-OUTPUT_DIR = "data/processed/seasons"
+from src.config import PROCESSED_DIR, SEASONS_DIR
+RAW_FILE = str(PROCESSED_DIR / "training_data.parquet")
+OUTPUT_DIR = str(SEASONS_DIR)
 
 def partition_data():
     if not os.path.exists(RAW_FILE):

@@ -5,13 +5,13 @@ import sys
 import time
 from nba_api.stats.endpoints import leaguegamefinder
 
-# Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from src.features.pregame import calculate_pregame_features
 
-PBP_2025_PATH = "data/processed/seasons/pbp_2025.parquet"
-LIVE_ELO_PATH = "data/processed/live_elo.csv"
+from src.config import SEASONS_DIR, LIVE_ELO_PATH
+from src.utils.nba_client import nba_api_call
+PBP_2025_PATH = str(SEASONS_DIR / "pbp_2025.parquet")
+LIVE_ELO_PATH = str(LIVE_ELO_PATH)
 
 def fix_2025_features():
     if not os.path.exists(PBP_2025_PATH):
@@ -23,11 +23,12 @@ def fix_2025_features():
     # 1. Fetch 2025-26 Box Scores
     print("  Fetching 2025-26 box scores from NBA API...")
     try:
-        game_finder = leaguegamefinder.LeagueGameFinder(
+        df_box_raw = nba_api_call(
+            leaguegamefinder.LeagueGameFinder,
+            df_index=0,
             season_nullable="2025-26",
             league_id_nullable='00'
         )
-        df_box_raw = game_finder.get_data_frames()[0]
         print(f"  Found {len(df_box_raw)} team-game rows for 2025.")
     except Exception as e:
         print(f"  ❌ Error fetching box scores: {e}")

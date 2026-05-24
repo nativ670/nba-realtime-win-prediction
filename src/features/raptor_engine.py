@@ -1,15 +1,8 @@
 import pandas as pd
 import numpy as np
 import os
-import sys
-import time
 from datetime import datetime
 from nba_api.stats.endpoints import leaguedashplayerstats
-
-# --- Path Injection ---
-# Add the project root to sys.path so 'src' can be found
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 from requests.exceptions import ReadTimeout, ConnectionError
 
 from src.config import RAPTOR_OFF_WEIGHTS, RAPTOR_DEF_WEIGHTS, RAPTOR_PATH
@@ -112,8 +105,13 @@ def fetch_player_stats():
             ) / df_combined['TOTAL_MIN']
 
         return df_combined
+    except (ReadTimeout, ConnectionError) as e:
+        print(f"Network error fetching player stats: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
     except Exception as e:
-        print(f"Error fetching player stats: {e}")
+        print(f"Unexpected error fetching player stats: {e}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()

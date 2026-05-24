@@ -7,26 +7,7 @@ import matplotlib.pyplot as plt
 import os
 import json
 
-# Define features and target constants
-BASE_FEATURES = [
-    'score_differential', 
-    'seconds_remaining_in_game', 
-    'possession_team_id', 
-    'elo_advantage', 
-    'rest_advantage', 
-    'distance_traveled'
-]
-
-ADVANCED_FEATURES = [
-    'momentum_differential', 
-    'home_timeouts_remaining', 
-    'away_timeouts_remaining', 
-    'home_in_bonus', 
-    'away_in_bonus',
-    'live_raptor_advantage'
-]
-
-FEATURES = BASE_FEATURES + ADVANCED_FEATURES
+from src.config import MODEL_FEATURES as FEATURES
 TARGET = 'home_win'
 GROUP_COL = 'GAME_ID'
 
@@ -114,7 +95,8 @@ def plot_and_save_importance(model, output_path='nba_feature_importance.png'):
     plt.savefig(output_path)
     plt.close()
 
-def save_model(model, output_path='src/models/xgb_v3_10man.json'):
+from src.config import XGB_MODEL_PATH
+def save_model(model, output_path=str(XGB_MODEL_PATH)):
     """Saves the trained model to a JSON file."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     print(f"Saving model to {output_path}...")
@@ -122,7 +104,8 @@ def save_model(model, output_path='src/models/xgb_v3_10man.json'):
 
 if __name__ == '__main__':
     # Mandatory Shootaround: Lightweight test with mock data
-    DATA_PATH = 'data/processed/seasons'
+    from src.config import SEASONS_DIR
+    DATA_PATH = str(SEASONS_DIR)
     
     try:
         if os.path.exists(DATA_PATH):
@@ -167,3 +150,5 @@ if __name__ == '__main__':
         print(f"Error during training: {e}")
         import traceback
         traceback.print_exc()
+        import sys
+        sys.exit(1)

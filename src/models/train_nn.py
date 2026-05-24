@@ -12,8 +12,9 @@ def train_lstm_model():
     """
     # 1. Load data
     print("Loading sequence data...")
-    X_path = 'data/processed/X_sequences.npy'
-    y_path = 'data/processed/y_sequences.npy'
+    from src.config import PROCESSED_DIR, LSTM_MODEL_PATH
+    X_path = str(PROCESSED_DIR / 'X_sequences.npy')
+    y_path = str(PROCESSED_DIR / 'y_sequences.npy')
     
     if not os.path.exists(X_path) or not os.path.exists(y_path):
         print(f"Error: Could not find sequence files at {X_path} or {y_path}")
@@ -65,7 +66,7 @@ def train_lstm_model():
     model.summary()
     
     # 6. Callbacks
-    save_path = 'src/models/lstm_v3_10man.keras'
+    save_path = str(LSTM_MODEL_PATH)
     checkpoint = ModelCheckpoint(
         save_path, 
         monitor='val_loss', 

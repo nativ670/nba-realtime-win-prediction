@@ -150,7 +150,8 @@ if 'accumulated_features' not in st.session_state:
 @st.cache_data
 def load_historical_metadata():
     """Loads pre-game context from all partitioned season files."""
-    seasons_dir = "data/processed/seasons"
+    from src.config import SEASONS_DIR
+    seasons_dir = str(SEASONS_DIR)
     if os.path.exists(seasons_dir):
         try:
             files = glob.glob(os.path.join(seasons_dir, "*.parquet"))
@@ -175,9 +176,8 @@ historical_meta = load_historical_metadata()
 def fetch_game_metadata(game_id):
     """Fetches game metadata like team names, date, and time using BoxScoreSummaryV3."""
     try:
-        summary = boxscoresummaryv3.BoxScoreSummaryV3(game_id=game_id)
-        df_summary = summary.get_data_frames()[1] # BoxScoreSummary (contains gameDate)
-        df_linescore = summary.get_data_frames()[4] # TeamStats/LineScore
+        df_summary = nba_api_call(boxscoresummaryv3.BoxScoreSummaryV3, df_index=1, game_id=game_id)
+        df_linescore = nba_api_call(boxscoresummaryv3.BoxScoreSummaryV3, df_index=4, game_id=game_id)
 
         if df_summary.empty or df_linescore.empty:
             return {}
@@ -185,7 +185,7 @@ def fetch_game_metadata(game_id):
         game_date_raw = df_summary.iloc[0]['gameDate']
         try:
             game_date = pd.to_datetime(game_date_raw).strftime("%B %d, %Y")
-        except:
+        except Exception as e:
             game_date = game_date_raw
 
         def get_full_name(row):
