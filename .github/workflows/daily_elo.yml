@@ -15,7 +15,8 @@ name: Daily NBA Data Update
 on:
   schedule:
     # 10:00 AM UTC = 7:00 AM ET — safe margin after West Coast games
-    - cron: '0 10 * * *'
+        # DISABLED: schedule trigger commented out
+    # - cron: '0 10 * * *'
   workflow_dispatch: # Allows manual triggering from the Actions tab
 
 jobs:
