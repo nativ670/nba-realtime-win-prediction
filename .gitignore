@@ -183,3 +183,7 @@ data/external/
 !data/processed/current_raptor.csv
 !data/processed/seasons/pbp_2025.parquet
 !data/processed/seasons/pbp_2026.parquet
+
+# MLflow
+mlruns/
+mlflow.db

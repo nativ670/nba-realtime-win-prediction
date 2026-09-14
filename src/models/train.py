@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
+import mlflow
+import mlflow.xgboost
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.metrics import accuracy_score, log_loss, brier_score_loss
 import matplotlib.pyplot as plt
@@ -51,15 +53,19 @@ def train_model(df):
     print(f"Training set size: {len(X_train)} rows ({df.iloc[train_idx][GROUP_COL].nunique()} games)")
     print(f"Test set size: {len(X_test)} rows ({df.iloc[test_idx][GROUP_COL].nunique()} games)")
 
+    params = {
+        'objective': 'binary:logistic',
+        'eval_metric': 'logloss',
+        'random_state': 42,
+        'n_estimators': 100,
+        'learning_rate': 0.1,
+        'max_depth': 5
+    }
+
     # Initialize and train XGBClassifier
-    model = xgb.XGBClassifier(
-        objective='binary:logistic',
-        eval_metric='logloss',
-        random_state=42,
-        n_estimators=100,
-        learning_rate=0.1,
-        max_depth=5
-    )
+    model = xgb.XGBClassifier(**params)
+
+    mlflow.log_params(params)
 
     print("Training model...")
     model.fit(X_train, y_train)
@@ -81,6 +87,10 @@ def evaluate_model(model, X_test, y_test):
     print(f"Accuracy:  {acc:.4f}")
     print(f"Log Loss:  {ll:.4f}")
     print(f"Brier Score: {bs:.4f}")
+    
+    mlflow.log_metric("accuracy", acc)
+    mlflow.log_metric("log_loss", ll)
+    mlflow.log_metric("brier_score", bs)
     
     return acc, ll, bs
 
@@ -139,10 +149,13 @@ if __name__ == '__main__':
             df = pd.DataFrame(mock_data)
 
         # Run pipeline
-        model, X_test, y_test = train_model(df)
-        evaluate_model(model, X_test, y_test)
-        plot_and_save_importance(model)
-        save_model(model)
+        with mlflow.start_run():
+            model, X_test, y_test = train_model(df)
+            evaluate_model(model, X_test, y_test)
+            plot_and_save_importance(model)
+            mlflow.log_artifact('nba_feature_importance.png')
+            save_model(model)
+            mlflow.xgboost.log_model(model, "xgboost-model")
         
         print("\nTraining script executed successfully!")
 

@@ -7,7 +7,16 @@ Replaces 6+ copy-pasted retry loops scattered across the codebase.
 
 import time
 import pandas as pd
+import requests
 from requests.exceptions import ReadTimeout, ConnectionError
+
+try:
+    from curl_cffi import requests as cr
+    from nba_api.stats.library.http import NBAStatsHTTP
+    _session = cr.Session(impersonate="chrome120")
+    NBAStatsHTTP.get_session = lambda self: _session
+except ImportError:
+    pass
 
 # Import config — use try/except for robustness during testing
 try:
@@ -79,15 +88,16 @@ def nba_api_call(endpoint_class, df_index=0, max_retries=None,
                       f"(only {len(dfs)} available)")
                 return pd.DataFrame()
 
-        except (ReadTimeout, ConnectionError) as e:
-            backoff = NBA_API_RETRY_SLEEP * (attempt + 1)
-            print(f"⚠️ NBA API timeout ({type(e).__name__})! "
-                  f"Retry {attempt + 1}/{_retries} in {backoff}s...")
-            time.sleep(backoff)
-
         except Exception as e:
-            print(f"❌ Unexpected error calling {endpoint_class.__name__}: {e}")
-            break
+            err_name = type(e).__name__.lower()
+            if "timeout" in err_name or "connection" in err_name or "read" in err_name:
+                backoff = NBA_API_RETRY_SLEEP * (attempt + 1)
+                print(f"⚠️ NBA API timeout ({type(e).__name__})! "
+                      f"Retry {attempt + 1}/{_retries} in {backoff}s...")
+                time.sleep(backoff)
+            else:
+                print(f"❌ Unexpected error calling {endpoint_class.__name__}: {e}")
+                break
 
     print(f"❌ Failed to call {endpoint_class.__name__} "
           f"after {_retries} attempts.")
@@ -124,15 +134,16 @@ def nba_api_call_multi(endpoint_class, df_indices=None,
             return [dfs[i] if i < len(dfs) else pd.DataFrame()
                     for i in df_indices]
 
-        except (ReadTimeout, ConnectionError) as e:
-            backoff = NBA_API_RETRY_SLEEP * (attempt + 1)
-            print(f"⚠️ NBA API timeout ({type(e).__name__})! "
-                  f"Retry {attempt + 1}/{_retries} in {backoff}s...")
-            time.sleep(backoff)
-
         except Exception as e:
-            print(f"❌ Unexpected error calling {endpoint_class.__name__}: {e}")
-            break
+            err_name = type(e).__name__.lower()
+            if "timeout" in err_name or "connection" in err_name or "read" in err_name:
+                backoff = NBA_API_RETRY_SLEEP * (attempt + 1)
+                print(f"⚠️ NBA API timeout ({type(e).__name__})! "
+                      f"Retry {attempt + 1}/{_retries} in {backoff}s...")
+                time.sleep(backoff)
+            else:
+                print(f"❌ Unexpected error calling {endpoint_class.__name__}: {e}")
+                break
 
     n = len(df_indices) if df_indices else 1
     return [pd.DataFrame()] * n
