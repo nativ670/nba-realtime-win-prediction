@@ -90,9 +90,9 @@ def nba_api_call(endpoint_class, df_index=0, max_retries=None,
 
         except Exception as e:
             err_name = type(e).__name__.lower()
-            if "timeout" in err_name or "connection" in err_name or "read" in err_name:
+            if "timeout" in err_name or "connection" in err_name or "read" in err_name or "httperror" in err_name or "jsondecodeerror" in err_name:
                 backoff = NBA_API_RETRY_SLEEP * (attempt + 1)
-                print(f"⚠️ NBA API timeout ({type(e).__name__})! "
+                print(f"⚠️ NBA API error ({type(e).__name__})! "
                       f"Retry {attempt + 1}/{_retries} in {backoff}s...")
                 time.sleep(backoff)
             else:
@@ -136,9 +136,9 @@ def nba_api_call_multi(endpoint_class, df_indices=None,
 
         except Exception as e:
             err_name = type(e).__name__.lower()
-            if "timeout" in err_name or "connection" in err_name or "read" in err_name:
+            if "timeout" in err_name or "connection" in err_name or "read" in err_name or "httperror" in err_name or "jsondecodeerror" in err_name:
                 backoff = NBA_API_RETRY_SLEEP * (attempt + 1)
-                print(f"⚠️ NBA API timeout ({type(e).__name__})! "
+                print(f"⚠️ NBA API error ({type(e).__name__})! "
                       f"Retry {attempt + 1}/{_retries} in {backoff}s...")
                 time.sleep(backoff)
             else:
@@ -146,7 +146,7 @@ def nba_api_call_multi(endpoint_class, df_indices=None,
                 break
 
     n = len(df_indices) if df_indices else 1
-    return [pd.DataFrame()] * n
+    return [pd.DataFrame() for _ in range(n)]
 
 
 # ==============================================================================

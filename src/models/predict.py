@@ -58,8 +58,7 @@ def run_live_simulator(game_id, delay=0.1):
         # Format display variables
         time_left = int(row['seconds_remaining_in_game'])
         score_diff = int(row['score_differential'])
-        possession = "Home" if row['possession_team_id'] == row['possession_team_id'] else "Away" # Mock logic for display if needed
-        # In our data, possession_team_id is the actual team ID. 
+        possession = 'Home' if row['is_home_possession'] > 0.5 else ('Away' if row['is_home_possession'] < 0.5 else 'Unknown')
         # For simplicity in output, we'll just show the score diff and prob.
         
         # Determine score diff sign for formatting

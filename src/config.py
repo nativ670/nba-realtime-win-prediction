@@ -24,7 +24,7 @@ EXTERNAL_DIR = DATA_DIR / "external"
 SEASONS_DIR = PROCESSED_DIR / "seasons"
 
 # Key data file paths
-LIVE_ELO_PATH = PROCESSED_DIR / "live_elo.csv"
+LIVE_ELO_PATH = PROCESSED_DIR / "live_elo.parquet"
 RAPTOR_PATH = PROCESSED_DIR / "current_raptor.csv"
 RAW_PBP_PATH = RAW_DIR / "nba_pbp_10y.parquet"
 RAW_BOX_PATH = RAW_DIR / "nba_box_scores_10y.parquet"
@@ -132,7 +132,7 @@ RAPTOR_DEF_WEIGHTS = {
 MODEL_FEATURES = [
     'score_differential',
     'seconds_remaining_in_game',
-    'possession_team_id',
+    'is_home_possession',
     'elo_advantage',
     'rest_advantage',
     'distance_traveled',

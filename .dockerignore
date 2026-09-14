@@ -1,0 +1,20 @@
+venv/
+.git/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Ignore massive arrays and raw models
+data/processed/X_sequences.npy
+data/processed/*.npy
+mlruns/
+mlflow.db
+
+# Only allow specific necessary data
+# Exclude all raw/processed data by default, then we can add back models if needed
+data/raw/
+data/processed/
+!data/processed/live_elo.parquet
+!data/processed/current_raptor.csv

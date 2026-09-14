@@ -43,15 +43,20 @@ def train_model(df):
     if missing_features:
         raise ValueError(f"Missing features in dataset: {missing_features}")
 
-    # Use GroupShuffleSplit to prevent game-level leakage
-    gss = GroupShuffleSplit(n_splits=1, train_size=0.8, random_state=42)
-    train_idx, test_idx = next(gss.split(df[FEATURES], df[TARGET], groups=df[GROUP_COL]))
+    # Chronological Split (prevents temporal leakage)
+    df = df.sort_values(by=GROUP_COL).reset_index(drop=True)
+    unique_games = df[GROUP_COL].unique()
+    
+    split_idx = int(len(unique_games) * 0.8)
+    train_games = set(unique_games[:split_idx])
+    
+    train_mask = df[GROUP_COL].isin(train_games)
+    
+    X_train, y_train = df[train_mask][FEATURES], df[train_mask][TARGET]
+    X_test, y_test = df[~train_mask][FEATURES], df[~train_mask][TARGET]
 
-    X_train, y_train = df.iloc[train_idx][FEATURES], df.iloc[train_idx][TARGET]
-    X_test, y_test = df.iloc[test_idx][FEATURES], df.iloc[test_idx][TARGET]
-
-    print(f"Training set size: {len(X_train)} rows ({df.iloc[train_idx][GROUP_COL].nunique()} games)")
-    print(f"Test set size: {len(X_test)} rows ({df.iloc[test_idx][GROUP_COL].nunique()} games)")
+    print(f"Training set size: {len(X_train)} rows ({len(train_games)} games)")
+    print(f"Test set size: {len(X_test)} rows ({len(unique_games) - len(train_games)} games)")
 
     params = {
         'objective': 'binary:logistic',
@@ -80,7 +85,7 @@ def evaluate_model(model, X_test, y_test):
     y_prob = model.predict_proba(X_test)[:, 1]
 
     acc = accuracy_score(y_test, y_pred)
-    ll = log_loss(y_test, y_prob)
+    ll = log_loss(y_test, y_prob, labels=[0, 1])
     bs = brier_score_loss(y_test, y_prob)
 
     print(f"--- Model Performance ---")
@@ -88,11 +93,18 @@ def evaluate_model(model, X_test, y_test):
     print(f"Log Loss:  {ll:.4f}")
     print(f"Brier Score: {bs:.4f}")
     
+    # Calculate Expected Calibration Error (ECE) via calibration_curve
+    from sklearn.calibration import calibration_curve
+    prob_true, prob_pred = calibration_curve(y_test, y_prob, n_bins=10)
+    ece = np.mean(np.abs(prob_true - prob_pred))
+    print(f"Expected Calibration Error (ECE): {ece:.4f}")
+    
     mlflow.log_metric("accuracy", acc)
     mlflow.log_metric("log_loss", ll)
     mlflow.log_metric("brier_score", bs)
+    mlflow.log_metric("ece", ece)
     
-    return acc, ll, bs
+    return acc, ll, bs, ece
 
 def plot_and_save_importance(model, output_path='nba_feature_importance.png'):
     """Plots feature importance and saves to file."""
@@ -113,29 +125,34 @@ def save_model(model, output_path=str(XGB_MODEL_PATH)):
     model.save_model(output_path)
 
 if __name__ == '__main__':
-    # Mandatory Shootaround: Lightweight test with mock data
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test-only", action="store_true", help="Run a fast mock shootaround test")
+    args = parser.parse_args()
+
+    # Setup MLflow
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    mlflow.set_experiment("NBA_RealTime_WP")
+
     from src.config import SEASONS_DIR
     DATA_PATH = str(SEASONS_DIR)
     
     try:
-        if os.path.exists(DATA_PATH):
-            df = load_data(DATA_PATH)
-        else:
-            print("Training data not found. Generating mock data for testing...")
-            # Create a small mock dataset for testing the script logic
+        if args.test_only or not os.path.exists(DATA_PATH):
+            print("Running in test mode. Generating mock data for testing...")
             np.random.seed(42)
             n_games = 5
             rows_per_game = 100
-            total_rows = n_games * rows_per_game
             
             mock_data = []
             for game_id in range(n_games):
                 for row in range(rows_per_game):
                     mock_data.append({
                         'GAME_ID': f'2023000{game_id}',
+                        'season': 2023,
                         'score_differential': np.random.randint(-20, 20),
                         'seconds_remaining_in_game': 2880 - (row * 28.8),
-                        'possession_team_id': np.random.randint(1610612737, 1610612766),
+                        'is_home_possession': float(np.random.choice([0.0, 1.0])),
                         'elo_advantage': np.random.uniform(-100, 100),
                         'rest_advantage': np.random.randint(-2, 3),
                         'distance_traveled': np.random.uniform(0, 2000),
@@ -144,11 +161,24 @@ if __name__ == '__main__':
                         'away_timeouts_remaining': np.random.randint(0, 7),
                         'home_in_bonus': np.random.randint(0, 2),
                         'away_in_bonus': np.random.randint(0, 2),
-                        'home_win': 1 if game_id % 2 == 0 else 0 # Simple pattern
+                        'live_raptor_advantage': np.random.uniform(-5, 5),
+                        'home_win': 1 if game_id % 2 == 0 else 0
                     })
             df = pd.DataFrame(mock_data)
+        else:
+            print(f"Loading real data from {DATA_PATH}...")
+            df = load_data(DATA_PATH)
 
         # Run pipeline
+        # Avoid creating random MLflow runs during test-only mock runs
+        if args.test_only:
+            print("Mock mode: skipping MLflow tracking.")
+            model, X_test, y_test = train_model(df)
+            evaluate_model(model, X_test, y_test)
+            print("Mock test completed successfully!")
+            import sys
+            sys.exit(0)
+            
         with mlflow.start_run():
             model, X_test, y_test = train_model(df)
             evaluate_model(model, X_test, y_test)
@@ -161,6 +191,8 @@ if __name__ == '__main__':
 
     except Exception as e:
         print(f"Error during training: {e}")
+        import traceback
+        traceback.print_exc()
         import traceback
         traceback.print_exc()
         import sys

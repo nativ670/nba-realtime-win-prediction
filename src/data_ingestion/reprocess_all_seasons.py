@@ -17,16 +17,26 @@ def get_full_season_schedule(season_year_str):
     Fetches the full season schedule using LeagueGameFinder.
     Format of season_year_str is 'YYYY-YY' e.g. '2023-24'
     """
-    print(f"  Fetching full season schedule for {season_year_str}...")
-    games = nba_api_call(
-        leaguegamefinder.LeagueGameFinder,
-        df_index=0,
-        season_nullable=season_year_str,
-        league_id_nullable='00'
-    )
-    if not games.empty:
-        games['GAME_DATE'] = pd.to_datetime(games['GAME_DATE'], errors='coerce')
-    return games
+    print(f"  Fetching full season schedule for {season_year_str} (Regular + Playoffs)...")
+    from nba_api.stats.library.parameters import SeasonTypeAllStar
+    all_games = []
+    for s_type in [SeasonTypeAllStar.regular, SeasonTypeAllStar.playoffs]:
+        games = nba_api_call(
+            leaguegamefinder.LeagueGameFinder,
+            df_index=0,
+            season_nullable=season_year_str,
+            league_id_nullable='00',
+            season_type_nullable=s_type
+        )
+        if not games.empty:
+            all_games.append(games)
+            
+    if not all_games:
+        return pd.DataFrame()
+        
+    combined = pd.concat(all_games).drop_duplicates(subset='GAME_ID')
+    combined['GAME_DATE'] = pd.to_datetime(combined['GAME_DATE'], errors='coerce')
+    return combined
 
 def reprocess_all_seasons():
     files = sorted(glob.glob(os.path.join(SEASONS_DIR, "pbp_*.parquet")))

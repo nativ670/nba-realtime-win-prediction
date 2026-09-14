@@ -93,7 +93,7 @@ def fix_2025_features():
     # 4. Add Elo from local live_elo.csv
     print("  Adding Elo ratings from live_elo.csv...")
     if os.path.exists(LIVE_ELO_PATH):
-        elo_df = pd.read_csv(LIVE_ELO_PATH)
+        elo_df = pd.read_parquet(LIVE_ELO_PATH)
         df_pre_features['game_date'] = pd.to_datetime(df_pre_features['game_date'])
         elo_df['date'] = pd.to_datetime(elo_df['date'], format='mixed')
         

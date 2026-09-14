@@ -52,13 +52,24 @@ def calculate_in_game_features(df_pbp):
     df['score_differential'] = df['home_score'] - df['away_score']
 
     # 3. IDENTIFY HOME/AWAY TEAM IDs
-    h_score_diff = df['home_score'].diff().fillna(0)
-    a_score_diff = df['away_score'].diff().fillna(0)
-    mask_h_scoring = (h_score_diff > 0) & (df['PLAYER1_TEAM_ID'].notna())
-    mask_a_scoring = (a_score_diff > 0) & (df['PLAYER1_TEAM_ID'].notna())
+    home_team_id = None
+    away_team_id = None
     
-    home_team_id = df.loc[mask_h_scoring, 'PLAYER1_TEAM_ID'].iloc[0] if mask_h_scoring.any() else None
-    away_team_id = df.loc[mask_a_scoring, 'PLAYER1_TEAM_ID'].iloc[0] if mask_a_scoring.any() else None
+    # Heuristic 1: Use HOMEDESCRIPTION / VISITORDESCRIPTION if available
+    if 'HOMEDESCRIPTION' in df.columns and 'VISITORDESCRIPTION' in df.columns:
+        mask_home_action = df['HOMEDESCRIPTION'].notna() & df['PLAYER1_TEAM_ID'].notna() & (df['PLAYER1_TEAM_ID'] != 0)
+        mask_away_action = df['VISITORDESCRIPTION'].notna() & df['PLAYER1_TEAM_ID'].notna() & (df['PLAYER1_TEAM_ID'] != 0)
+        if mask_home_action.any(): home_team_id = df.loc[mask_home_action, 'PLAYER1_TEAM_ID'].iloc[0]
+        if mask_away_action.any(): away_team_id = df.loc[mask_away_action, 'PLAYER1_TEAM_ID'].iloc[0]
+
+    # Heuristic 2: Fallback to score differential parsing
+    if home_team_id is None or away_team_id is None:
+        h_score_diff = df['home_score'].diff().fillna(0)
+        a_score_diff = df['away_score'].diff().fillna(0)
+        mask_h_scoring = (h_score_diff > 0) & (df['PLAYER1_TEAM_ID'].notna())
+        mask_a_scoring = (a_score_diff > 0) & (df['PLAYER1_TEAM_ID'].notna())
+        if home_team_id is None and mask_h_scoring.any(): home_team_id = df.loc[mask_h_scoring, 'PLAYER1_TEAM_ID'].iloc[0]
+        if away_team_id is None and mask_a_scoring.any(): away_team_id = df.loc[mask_a_scoring, 'PLAYER1_TEAM_ID'].iloc[0]
     
     team_ids = [tid for tid in df['PLAYER1_TEAM_ID'].unique() if pd.notna(tid) and tid != 0]
     if home_team_id is None and len(team_ids) >= 1: home_team_id = team_ids[0]
@@ -82,6 +93,11 @@ def calculate_in_game_features(df_pbp):
             df.loc[mask_flip, 'possession_team_id'] = df.loc[mask_flip, 'PLAYER1_TEAM_ID'].map(other_team_map)
             
     df['possession_team_id'] = df['possession_team_id'].ffill()
+    df['is_home_possession'] = np.where(
+        df['possession_team_id'] == home_team_id, 1.0,
+        np.where(df['possession_team_id'] == away_team_id, 0.0, 0.5)
+    )
+
 
     # 5. CLUTCH CONTEXT (Timeouts & Fouls)
     group_cols = ['GAME_ID', 'PERIOD'] if 'GAME_ID' in df.columns else ['PERIOD']

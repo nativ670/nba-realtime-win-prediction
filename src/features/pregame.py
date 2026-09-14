@@ -112,8 +112,8 @@ def calculate_pregame_features(df_raw):
     df = df.sort_values(['team_id', 'game_date'])
     df['game_date'] = pd.to_datetime(df['game_date'])
     
-    # Rest Days
-    df['prev_game_date'] = df.groupby('team_id')['game_date'].shift(1)
+    # Rest Days (Partition by season to prevent cross-season leakage)
+    df['prev_game_date'] = df.groupby(['team_id', 'season'])['game_date'].shift(1)
     df['days_rest'] = (df['game_date'] - df['prev_game_date']).dt.days - 1
     df['days_rest'] = df['days_rest'].fillna(7) # Default to 7 if no prior game
     df['days_rest_capped'] = df['days_rest'].clip(upper=5)
@@ -121,13 +121,13 @@ def calculate_pregame_features(df_raw):
     # Back-to-Back Indicators
     df['b2b_second_game'] = (df['days_rest'] == 0).astype(int)
     
-    df['next_game_date'] = df.groupby('team_id')['game_date'].shift(-1)
+    df['next_game_date'] = df.groupby(['team_id', 'season'])['game_date'].shift(-1)
     df['days_until_next'] = (df['next_game_date'] - df['game_date']).dt.days - 1
     df['b2b_first_game'] = (df['days_until_next'] == 0).astype(int)
 
     # Distance Traveled (Haversine)
-    df['prev_game_lat'] = df.groupby('team_id')['game_lat'].shift(1)
-    df['prev_game_lon'] = df.groupby('team_id')['game_lon'].shift(1)
+    df['prev_game_lat'] = df.groupby(['team_id', 'season'])['game_lat'].shift(1)
+    df['prev_game_lon'] = df.groupby(['team_id', 'season'])['game_lon'].shift(1)
     
     df['distance_traveled'] = haversine_vectorized(
         df['prev_game_lat'], df['prev_game_lon'],

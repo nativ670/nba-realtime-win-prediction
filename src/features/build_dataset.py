@@ -71,28 +71,16 @@ def build_training_dataset():
     df_box = df_box_raw.copy()
     
     # Pre-game features logic: needs team and opponent on the same row or grouped
-    # Let's create the paired matchup for pregame processing
-    df_box_paired = []
-    for gid, group in df_box.groupby('game_id'):
-        if len(group) == 2:
-            row1 = group.iloc[0].to_dict()
-            row2 = group.iloc[1].to_dict()
-            
-            # Row for Team 1
-            r1 = row1.copy()
-            r1['opponent_team_id'] = row2['team_id']
-            r1['opponent_team_score'] = row2['pts']
-            r1['team_home_away'] = 'home' if 'vs.' in r1['matchup'] else 'away'
-            df_box_paired.append(r1)
-            
-            # Row for Team 2
-            r2 = row2.copy()
-            r2['opponent_team_id'] = row1['team_id']
-            r2['opponent_team_score'] = row1['pts']
-            r2['team_home_away'] = 'home' if 'vs.' in r2['matchup'] else 'away'
-            df_box_paired.append(r2)
-            
-    df_box_pre = pd.DataFrame(df_box_paired)
+    # Let's create the paired matchup for pregame processing using vectorization
+    df_box_merged = df_box.merge(df_box, on='game_id', suffixes=('', '_opp'))
+    df_box_pre = df_box_merged[df_box_merged['team_id'] != df_box_merged['team_id_opp']].copy()
+    
+    df_box_pre = df_box_pre.rename(columns={
+        'team_id_opp': 'opponent_team_id',
+        'pts_opp': 'opponent_team_score'
+    })
+    
+    df_box_pre['team_home_away'] = np.where(df_box_pre['matchup'].str.contains('vs.'), 'home', 'away')
     
     # Map needed columns
     df_box_pre = df_box_pre.rename(columns={
@@ -159,7 +147,7 @@ if __name__ == "__main__":
             'home_timeouts_remaining', 'away_timeouts_remaining',
             'home_team_fouls', 'away_team_fouls', 'home_in_bonus', 'away_in_bonus',
             'home_points_last_3_mins', 'away_points_last_3_mins', 'momentum_differential',
-            'possession_team_id', 'elo_advantage', 'home_win'
+            'is_home_possession', 'elo_advantage', 'home_win'
         ]
         print("\nSample Rows:")
         print(full_df[sample_cols].head())

@@ -143,7 +143,7 @@ def build_feature_payload(latest_state):
             payload[feat] = float(STATIC_FEATURES[feat])
         elif feat in latest_state.index:
             val = latest_state[feat]
-            # Handle NaN gracefully (e.g., possession_team_id can be NaN)
+            # Handle NaN gracefully (e.g., is_home_possession can be NaN)
             payload[feat] = 0 if pd.isna(val) else float(val)
         else:
             # Feature missing entirely — default to 0
@@ -211,11 +211,16 @@ def run_poller(game_id):
                     # No new plays — game might be in timeout/halftime
                     print(f"[=] No new actions since actionNumber {last_action_number}. Waiting...")
                 else:
-                    # 3. Run feature engineering ONLY on new rows
-                    new_features = calculate_in_game_features(new_actions)
-                    new_features = sub_tracker.process_pbp(new_features)
+                    # 3. Compute ALL features on full history (to preserve cumsum states)
+                    full_features = calculate_in_game_features(df_pbp)
+                    
+                    # 4. Extract ONLY the newly engineered rows
+                    new_engineered_rows = extract_new_actions(full_features, last_action_number)
+                    
+                    # 5. Advance the substitution tracker state machine on the new rows
+                    new_features = sub_tracker.process_pbp(new_engineered_rows)
 
-                    # 4. Accumulate into the running feature DataFrame
+                    # 6. Accumulate into the running feature DataFrame
                     if accumulated_features_df is None:
                         accumulated_features_df = new_features
                     else:
@@ -290,7 +295,7 @@ def run_mock_test():
         'PERIOD': [1, 1, 1],
         'PCTIMESTRING': ['12:00', '11:30', '11:00'],
         'EVENTMSGTYPE': [10, 1, 1],  # Start, Made Shot, Made Shot
-        'SCORE': ['0 - 0', '0 - 2', '3 - 2'],
+        'SCORE': ['0 - 0', '2 - 0', '2 - 3'],
         'PLAYER1_TEAM_ID': [0, 1610612737, 1610612738],
         'EVENTNUM': [1, 2, 3]
     })
@@ -330,7 +335,7 @@ def run_mock_test():
         assert min(BASE_POLL_INTERVAL * (2 ** 2), 120) == 60
         print("[+] Circuit breaker backoff math: OK")
 
-        print("[+] Mock Test Passed ✅")
+        print("[+] Mock Test Passed OK")
         return True
 
     except Exception as e:

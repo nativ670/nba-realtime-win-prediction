@@ -183,7 +183,7 @@ def update_pbp(start_date=None, end_date=None):
     if start_date is None:
         # Try to infer from live_elo.csv (our source of truth for finished games)
         if LIVE_ELO_PATH.exists():
-            df_elo_dates = pd.read_csv(LIVE_ELO_PATH, usecols=['date', 'score1', 'score2'])
+            df_elo_dates = pd.read_parquet(LIVE_ELO_PATH, usecols=['date', 'score1', 'score2'])
             df_elo_dates['date'] = pd.to_datetime(df_elo_dates['date'], errors='coerce')
             finished = df_elo_dates.dropna(subset=['score1', 'score2'])
             if not finished.empty:
@@ -216,7 +216,7 @@ def update_pbp(start_date=None, end_date=None):
     # ------------------------------------------------------------------
     elo_df = pd.DataFrame()
     if LIVE_ELO_PATH.exists():
-        elo_df = pd.read_csv(LIVE_ELO_PATH)
+        elo_df = pd.read_parquet(LIVE_ELO_PATH)
         elo_df['date'] = pd.to_datetime(elo_df['date'], format='mixed')
 
     # ------------------------------------------------------------------
@@ -303,8 +303,7 @@ def update_pbp(start_date=None, end_date=None):
                     game_date_dt = pd.Timestamp(game_date)
                     match_elo = elo_df[elo_df['date'] == game_date_dt]
                     game_elo_row = match_elo[
-                        (match_elo['team1'] == home_abbr) &
-                        (match_elo['is_home'] == 1)
+                        (match_elo['team1'] == home_abbr)
                     ]
                     if not game_elo_row.empty:
                         row = game_elo_row.iloc[0]

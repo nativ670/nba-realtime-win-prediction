@@ -104,21 +104,27 @@ def run_ingestion(limit_games=None):
         if not df_pbp.empty:
             all_pbp_data.append(df_pbp)
         
-        # Consistent rate limiting
-        time.sleep(REQUEST_DELAY)
+        # Consistent rate limiting is handled by nba_client.py (Removed double sleep here)
         
         # Partial save every 500 games to avoid memory/crash loss
-        if i > 0 and i % 500 == 0:
+        if (i + 1) % 500 == 0:
+            print(f"Intermediate save at game {i+1}...")
             temp_df = pd.concat(all_pbp_data)
-            temp_df.to_parquet(PBP_FILE_PATH, index=False)
-            print(f"--- Checkpoint saved (parquet) at game {i} ---")
+            temp_path = str(PBP_FILE_PATH).replace('.parquet', f'_temp_{i+1}.parquet')
+            temp_df.to_parquet(temp_path, index=False)
 
     # 4. Final consolidation and save
     if all_pbp_data:
         print("Finalizing and saving data...")
         final_df = pd.concat(all_pbp_data)
-        final_df.to_parquet(PBP_FILE_PATH, index=False)
-        print(f"Success! Data saved to {PBP_FILE_PATH}")
+        
+        # Safe test path
+        out_path = PBP_FILE_PATH
+        if limit_games:
+            out_path = str(PBP_FILE_PATH).replace('.parquet', '_TEST.parquet')
+            
+        final_df.to_parquet(out_path, index=False)
+        print(f"Success! Data saved to {out_path}")
         print(f"Total rows: {len(final_df)}")
     else:
         print("No PBP data was successfully retrieved.")
@@ -128,18 +134,30 @@ def run_ingestion(limit_games=None):
 # ==============================================================================
 
 if __name__ == "__main__":
-    # Lightweight test: Fetch 1 regular season and 1 playoff game
-    print("RUNNING LIGHTWEIGHT TEST (PLAYOFF INCLUSION)...")
-    TEST_SEASONS = ["2023-24"]
-    # Temporarily override SEASONS for testing
-    original_seasons = SEASONS
-    SEASONS = TEST_SEASONS
-    
-    start_time = time.time()
-    run_ingestion(limit_games=5) # Increased slightly to ensure we see both types if possible
-    
-    duration = (time.time() - start_time) / 60
-    print(f"Test job completed in {duration:.2f} minutes.")
-    
-    # Reset SEASONS for future imports
-    SEASONS = original_seasons
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test-only", action="store_true", help="Run a fast mock shootaround test")
+    args = parser.parse_args()
+
+    if args.test_only:
+        # Lightweight test: Fetch 1 regular season and 1 playoff game
+        print("RUNNING LIGHTWEIGHT TEST (PLAYOFF INCLUSION)...")
+        TEST_SEASONS = ["2023-24"]
+        # Temporarily override SEASONS for testing
+        original_seasons = SEASONS
+        SEASONS = TEST_SEASONS
+        
+        start_time = time.time()
+        run_ingestion(limit_games=5) # Increased slightly to ensure we see both types if possible
+        
+        duration = (time.time() - start_time) / 60
+        print(f"Test job completed in {duration:.2f} minutes.")
+        
+        # Reset SEASONS for future imports
+        SEASONS = original_seasons
+    else:
+        print("RUNNING FULL INGESTION...")
+        start_time = time.time()
+        run_ingestion()
+        duration = (time.time() - start_time) / 60
+        print(f"Full ingestion completed in {duration:.2f} minutes.")

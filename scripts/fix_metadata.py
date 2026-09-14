@@ -102,7 +102,7 @@ def fix_file_metadata(file_path):
     # 5. Add Elo from local live_elo.csv
     print("  Adding Elo ratings from live_elo.csv...")
     if os.path.exists(LIVE_ELO_PATH):
-        elo_df = pd.read_csv(LIVE_ELO_PATH)
+        elo_df = pd.read_parquet(LIVE_ELO_PATH)
         df_final_pre = add_external_features(df_pre_features, elo_df)
         
         print(f"  External features join result: {len(df_final_pre)} rows (from {len(df_pre_features)})")

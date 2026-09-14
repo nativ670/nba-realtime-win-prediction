@@ -60,17 +60,17 @@ def get_games_for_date_range(start_date, end_date):
 def update_elo():
     # 1. Load existing Elo
     if os.path.exists(LIVE_ELO_PATH):
-        df_live = pd.read_csv(LIVE_ELO_PATH)
+        df_live = pd.read_parquet(LIVE_ELO_PATH)
         df_live['date'] = pd.to_datetime(df_live['date'], errors='coerce')
     else:
-        print("Initializing live_elo.csv from historical data...")
+        print("Initializing live_elo.parquet from historical data...")
         df_live = fetch_elo_data()
         if df_live.empty:
             print("Failed to fetch historical data. Exiting.")
             return
         df_live['date'] = pd.to_datetime(df_live['date'], errors='coerce')
         os.makedirs(os.path.dirname(LIVE_ELO_PATH), exist_ok=True)
-        df_live.to_csv(LIVE_ELO_PATH, index=False)
+        df_live.to_parquet(LIVE_ELO_PATH, index=False)
 
     # 2. Determine Catch-up Range
     last_date = df_live['date'].max()
@@ -150,13 +150,7 @@ def update_elo():
                 'date': game_date, 'season': current_season, 'neutral': 0, 'playoff': np.nan,
                 'team1': team_h, 'team2': team_a, 'elo1_pre': elo_h_pre, 'elo2_pre': elo_a_pre,
                 'elo_prob1': prob_h, 'elo_prob2': 1-prob_h, 'elo1_post': elo_h_post, 'elo2_post': elo_a_post,
-                'score1': score_h, 'score2': score_a, 'is_home': 1
-            })
-            new_rows.append({
-                'date': game_date, 'season': current_season, 'neutral': 0, 'playoff': np.nan,
-                'team1': team_a, 'team2': team_h, 'elo1_pre': elo_a_pre, 'elo2_pre': elo_h_pre,
-                'elo_prob1': 1-prob_h, 'elo_prob2': prob_h, 'elo1_post': elo_a_post, 'elo2_post': elo_h_post,
-                'score1': score_a, 'score2': score_h, 'is_home': 0
+                'score1': score_h, 'score2': score_a
             })
             latest_elos[team_h], latest_elos[team_a] = elo_h_post, elo_a_post
             
@@ -165,7 +159,7 @@ def update_elo():
         # Periodic saves
         if days_processed % 30 == 0 and new_rows:
             df_live = pd.concat([df_live, pd.DataFrame(new_rows)], ignore_index=True)
-            df_live.to_csv(LIVE_ELO_PATH, index=False)
+            df_live.to_parquet(LIVE_ELO_PATH, index=False)
             new_rows = []
             print(f"Checkpoint saved at {target_date_str}.")
 
@@ -175,7 +169,7 @@ def update_elo():
     
     # End of Elo update
     
-    df_live.to_csv(LIVE_ELO_PATH, index=False)
+    df_live.to_parquet(LIVE_ELO_PATH, index=False)
     print(f"Elo update complete. Final date: {yesterday.strftime('%Y-%m-%d')}")
 
 if __name__ == "__main__":

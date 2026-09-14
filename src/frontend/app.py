@@ -297,7 +297,7 @@ def get_predictions(df_features, elo_adv, rest_adv, dist_trav):
                 payload_sequence.append({
                     "score_differential": int(s_row['score_differential']),
                     "seconds_remaining_in_game": float(s_row['seconds_remaining_in_game']),
-                    "possession_team_id": int(s_row['possession_team_id']) if pd.notna(s_row['possession_team_id']) else 0,
+                    "is_home_possession": float(s_row['is_home_possession']) if pd.notna(s_row['is_home_possession']) else 0.5,
                     "elo_advantage": float(elo_adv),
                     "rest_advantage": int(rest_adv),
                     "distance_traveled": float(dist_trav),

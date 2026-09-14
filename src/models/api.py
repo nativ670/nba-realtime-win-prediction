@@ -10,14 +10,15 @@ from typing import List
 
 from src.config import (
     MODEL_FEATURES, XGB_MODEL_PATH, LSTM_MODEL_PATH,
-    XGB_WEIGHT, LSTM_WEIGHT, LSTM_SEQUENCE_LENGTH
+    XGB_WEIGHT, LSTM_WEIGHT, LSTM_SEQUENCE_LENGTH,
+    PROCESSED_DIR
 )
 
 # Pydantic model for individual game state
 class GameFeatureList(BaseModel):
     score_differential: int = Field(..., description="Home Score - Away Score")
     seconds_remaining_in_game: float = Field(..., description="Seconds remaining in the game")
-    possession_team_id: int = Field(..., description="ID of the team currently in possession")
+    is_home_possession: float = Field(..., description="1 if home possession, 0 if away, 0.5 if unknown")
     elo_advantage: float = Field(..., description="Home Elo - Away Elo")
     rest_advantage: int = Field(..., description="Home Rest Days - Away Rest Days")
     distance_traveled: float = Field(..., description="Distance traveled by the away team")
@@ -30,16 +31,16 @@ class GameFeatureList(BaseModel):
 
 # Pydantic model for ensemble input
 class EnsemblePayload(BaseModel):
-    sequence: List[GameFeatureList] = Field(..., max_items=15, description="A sequence of up to 15 game feature states")
+    sequence: List[GameFeatureList] = Field(..., max_length=15, description="A sequence of up to 15 game feature states")
 
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "sequence": [
                     {
                         "score_differential": 5,
                         "seconds_remaining_in_game": 300.0,
-                        "possession_team_id": 1610612737,
+                        "is_home_possession": 1.0,
                         "elo_advantage": 50.5,
                         "rest_advantage": 1,
                         "distance_traveled": 450.0,
@@ -53,6 +54,7 @@ class EnsemblePayload(BaseModel):
                 ]
             }
         }
+    }
 
 # Global variables to hold the models
 xgb_model = None
@@ -60,12 +62,16 @@ lstm_model = None
 
 app = FastAPI(title="NBA Real-Time Win Probability API - The Blender")
 
-@app.on_event("startup")
-def load_models():
+import joblib
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Loads both XGBoost and LSTM models on application startup."""
-    global xgb_model, lstm_model
+    global xgb_model, lstm_model, lstm_scaler
     xgb_path = XGB_MODEL_PATH
     lstm_path = LSTM_MODEL_PATH
+    scaler_path = PROCESSED_DIR / 'lstm_scaler.pkl'
     
     # Load XGBoost
     if not xgb_path.exists():
@@ -75,19 +81,34 @@ def load_models():
         xgb_model.load_model(str(xgb_path))
         print(f"XGBoost model loaded successfully from {xgb_path}")
     
-    # Load LSTM
+    # Load LSTM & Scaler
     if not lstm_path.exists():
         print(f"Warning: LSTM model not found at {lstm_path}")
     else:
         lstm_model = load_keras_model(str(lstm_path))
         print(f"LSTM model loaded successfully from {lstm_path}")
+        
+    if not scaler_path.exists():
+        print(f"Warning: LSTM scaler not found at {scaler_path}")
+        lstm_scaler = None
+    else:
+        lstm_scaler = joblib.load(str(scaler_path))
+        print(f"LSTM scaler loaded successfully from {scaler_path}")
+        
+    yield
+    # Cleanup on shutdown (if any)
+    xgb_model = None
+    lstm_model = None
+    lstm_scaler = None
+
+app.router.lifespan_context = lifespan
 
 @app.get("/")
 def read_root():
     return {"message": "NBA Real-Time Win Probability API (The Blender) is running."}
 
 @app.post("/predict_win_prob")
-async def predict_win_prob(payload: EnsemblePayload):
+def predict_win_prob(payload: EnsemblePayload):
     """
     Predicts the home team win probability using an ensemble of XGBoost and LSTM models.
     """
@@ -99,8 +120,8 @@ async def predict_win_prob(payload: EnsemblePayload):
 
     try:
         # --- 1. PREPARE DATA ---
-        # Convert Pydantic sequence to a list of dicts
-        raw_sequence = [item.dict() for item in payload.sequence]
+        # Convert Pydantic sequence to a list of dicts (use model_dump for v2, fallback to dict)
+        raw_sequence = [item.model_dump() if hasattr(item, 'model_dump') else item.dict() for item in payload.sequence]
         
         # Create a DataFrame for feature extraction and consistency
         df_seq = pd.DataFrame(raw_sequence)[MODEL_FEATURES]
@@ -126,9 +147,14 @@ async def predict_win_prob(payload: EnsemblePayload):
             # Should not happen due to Pydantic max_items validation, but for safety:
             seq_array = seq_array[-LSTM_SEQUENCE_LENGTH:]
             
+        # Scale the sequence array if the scaler was loaded
+        if lstm_scaler is not None:
+            seq_array = lstm_scaler.transform(seq_array)
+            
         # Reshape for LSTM: (1, LSTM_SEQUENCE_LENGTH, feature_count)
         lstm_input = seq_array.reshape(1, LSTM_SEQUENCE_LENGTH, len(MODEL_FEATURES))
-        lstm_probs = lstm_model.predict(lstm_input, verbose=0)
+        # Use direct call instead of predict() for low-latency single-batch API inference
+        lstm_probs = lstm_model(lstm_input, training=False).numpy()
         lstm_prob = float(lstm_probs[0][0])
         
         # --- 4. THE BLEND (Weighted Average) ---
@@ -145,4 +171,5 @@ async def predict_win_prob(payload: EnsemblePayload):
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
